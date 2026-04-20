@@ -495,8 +495,42 @@ def extract_route_flow_hints(repo: Path) -> List[RouteFlowHint]:
     method_names = [
         'createSession', 'attachReceiver', 'touchSession', 'getChunkUploadUrl',
         'getChunkDownloadUrl', 'deleteChunk', 'getSession', 'getCompletionFlags',
-        'completeSession', 'markSessionCanceled'
+        'completeSession', 'markSessionCanceled', 'isReceiverReady'
     ]
+
+    def service_step_lines(name: str) -> List[str]:
+        svc_match = re.search(r'\b' + re.escape(name) + r'\s*\(', service_txt)
+        if not svc_match:
+            return []
+        svc_line = service_txt[: svc_match.start()].count('\n') + 1
+        lines = [f'service `{name}()` at `{service_rel}:{svc_line}`']
+        provider_links = []
+        if name == 'getChunkUploadUrl':
+            provider_links.append('getUploadUrl')
+        elif name == 'getChunkDownloadUrl':
+            provider_links.extend(['chunkExists', 'getDownloadUrl'])
+        elif name == 'deleteChunk':
+            provider_links.append('deleteChunk')
+        elif name == 'completeSession':
+            provider_links.append('cleanupSession')
+        for provider_rel, hits in provider_hits.items():
+            matched = [h for h in provider_links if h in hits]
+            if matched:
+                lines.append(f'provider `{provider_rel}` via `{", ".join(matched)}`')
+        return lines
+
+    helper_blocks: Dict[str, str] = {}
+    helper_matches = []
+    for helper_name in ('createUploadHandler', 'createDownloadHandler'):
+        helper_match = re.search(r'const\s+' + re.escape(helper_name) + r'\s*=\s*async\s*\(', controller_txt)
+        if helper_match:
+            helper_matches.append((helper_name, helper_match.start()))
+    helper_matches.sort(key=lambda x: x[1])
+    for idx, (helper_name, start) in enumerate(helper_matches):
+        next_start = helper_matches[idx + 1][1] if idx + 1 < len(helper_matches) else controller_txt.find('\n\n  app.', start)
+        if next_start == -1:
+            next_start = len(controller_txt)
+        helper_blocks[helper_name] = controller_txt[start:next_start]
 
     route_matches = list(FASTIFY_ROUTE_RE.finditer(controller_txt))
     flow_hints: List[RouteFlowHint] = []
@@ -509,32 +543,29 @@ def extract_route_flow_hints(repo: Path) -> List[RouteFlowHint]:
         block = controller_txt[start:next_start]
 
         chain = [f'route `{route_method} {route_path}`', f'controller `{controller_rel}:{route_line}`']
-        called = []
+        called: List[str] = []
         for name in method_names:
             if re.search(r'\bservice\.' + re.escape(name) + r'\b', block):
                 called.append(name)
+
+        helper_called = None
+        for helper_name in helper_blocks:
+            if re.search(r'\b' + re.escape(helper_name) + r'\s*\(', block):
+                helper_called = helper_name
+                chain.append(f'handler `{helper_name}()`')
+                helper_block = helper_blocks[helper_name]
+                for name in method_names:
+                    if re.search(r'\bservice\.' + re.escape(name) + r'\b', helper_block):
+                        called.append(name)
+
         seen = set()
         for name in called:
             if name in seen:
                 continue
             seen.add(name)
-            svc_match = re.search(r'\b' + re.escape(name) + r'\s*\(', service_txt)
-            if svc_match:
-                svc_line = service_txt[: svc_match.start()].count('\n') + 1
-                chain.append(f'service `{name}()` at `{service_rel}:{svc_line}`')
-                provider_links = []
-                if name == 'getChunkUploadUrl':
-                    provider_links.append('getUploadUrl')
-                elif name == 'getChunkDownloadUrl':
-                    provider_links.extend(['chunkExists', 'getDownloadUrl'])
-                elif name == 'deleteChunk':
-                    provider_links.append('deleteChunk')
-                elif name == 'completeSession':
-                    provider_links.append('cleanupSession')
-                for provider_rel, hits in provider_hits.items():
-                    matched = [h for h in provider_links if h in hits]
-                    if matched:
-                        chain.append(f'provider `{provider_rel}` via `{", ".join(matched)}`')
+            for line in service_step_lines(name):
+                chain.append(line)
+
         flow_hints.append(RouteFlowHint(method=route_method, path=route_path, file=controller_rel, line=route_line, chain=chain))
 
     return flow_hints[:40]
