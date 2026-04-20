@@ -2,27 +2,51 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-CMD="${1:-analyze}"
-shift || true
+FIRST="${1:-}"
 
-case "$CMD" in
+# Smooth default:
+#   graplite
+#   graplite .
+#   graplite /path/to/repo
+# all mean: analyze with full short-name outputs (MAP.md + IMPACT.md)
+if [[ -z "$FIRST" ]]; then
+  exec python3 "$ROOT/tools/graplite_scan.py" --repo . --mode short
+fi
+
+case "$FIRST" in
   analyze)
+    shift || true
     REPO="${1:-.}"
     shift || true
     exec python3 "$ROOT/tools/graplite_scan.py" --repo "$REPO" --mode short "$@"
     ;;
   project)
+    shift || true
     REPO="${1:-.}"
     shift || true
     exec python3 "$ROOT/tools/graplite_scan.py" --repo "$REPO" --mode project "$@"
     ;;
   agent)
+    shift || true
     REPO="${1:-.}"
     shift || true
     exec python3 "$ROOT/tools/graplite_scan.py" --repo "$REPO" --mode agent-claude "$@"
     ;;
+  help|-h|--help)
+    cat <<'EOF'
+Usage:
+  graplite                   # analyze current repo -> MAP.md + IMPACT.md
+  graplite .                 # same as above
+  graplite /path/to/repo     # analyze target repo -> MAP.md + IMPACT.md
+  graplite analyze [repo]
+  graplite project [repo]
+  graplite agent [repo]
+EOF
+    ;;
   *)
-    echo "Usage: $(basename "$0") [analyze|project|agent] [repo-path] [extra args...]" >&2
-    exit 1
+    # Treat first arg as repo path for the smoothest UX.
+    REPO="$FIRST"
+    shift || true
+    exec python3 "$ROOT/tools/graplite_scan.py" --repo "$REPO" --mode short "$@"
     ;;
 esac

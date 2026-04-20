@@ -4,30 +4,50 @@ Local/offline scanning logic to generate two **in-repo** Markdown files.
 
 ## Smooth one-command usage
 
-From anywhere:
+If you're already inside the target repo:
 
 ```bash
-/home/gone/.openclaw/workspace/graplite-scan/bin/graplite analyze /path/to/repo
+/home/gone/.openclaw/workspace/graplite-scan/bin/graplite
 ```
 
-Or if you're already inside the target repo:
+Or:
 
 ```bash
-/home/gone/.openclaw/workspace/graplite-scan/bin/graplite analyze .
+/home/gone/.openclaw/workspace/graplite-scan/bin/graplite .
+/home/gone/.openclaw/workspace/graplite-scan/bin/graplite /path/to/repo
 ```
 
-Default short outputs:
+Default outputs (full detailed mode with short names):
 - `MAP.md`
 - `IMPACT.md`
 
-## Other modes
+## Explicit modes
 
 ```bash
+# same default output names
+/home/gone/.openclaw/workspace/graplite-scan/bin/graplite analyze .
+
 # longer project-style names
 /home/gone/.openclaw/workspace/graplite-scan/bin/graplite project .
 
 # legacy agent/claude naming
 /home/gone/.openclaw/workspace/graplite-scan/bin/graplite agent .
+```
+
+## Optional shell alias
+
+Source this file in your shell startup:
+
+```bash
+source /home/gone/.openclaw/workspace/graplite-scan/shell/graplite.sh
+```
+
+Then just run:
+
+```bash
+graplite
+graplite .
+graplite /path/to/repo
 ```
 
 ## References (optional)
