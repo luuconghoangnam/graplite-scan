@@ -32,7 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
@@ -125,6 +125,10 @@ DIR_RESP_HINTS = {
     'services': 'service modules',
     'test': 'tests',
     'tests': 'tests',
+    'core': 'shared core utilities/services',
+    'features': 'feature-oriented modules',
+    'modules': 'backend feature modules',
+    'transfer': 'transfer/signaling/storage flow',
 }
 
 
@@ -150,6 +154,14 @@ class RegisterCall:
     name: str
     file: str
     line: int
+
+
+@dataclass
+class TransferFileHint:
+    file: str
+    line: int
+    kind: str
+    value: str
 
 
 def is_ignored(path: Path, ignore_dirs: Set[str]) -> bool:
@@ -413,6 +425,37 @@ def extract_gateway_hints(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[s
     return out
 
 
+def extract_transfer_flow_hints(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) -> List[TransferFileHint]:
+    hints: List[TransferFileHint] = []
+    interesting_words = {
+        'createSession', 'attachReceiver', 'completeSession', 'markSessionCanceled',
+        'registerTransferRoutes', 'registerTransferGateway', 'registerPeerGateway',
+        'getChunkUploadUrl', 'getChunkDownloadUrl', 'deleteChunk', 'touchSession',
+        'create_session', 'join_session', 'session_created', 'session_joined',
+        'receiver_joined', 'sender_complete', 'receiver_complete', 'session_completed',
+        'session_canceled', 'announce_presence', 'get_nearby_peers', 'signal', 'transfer_intent'
+    }
+    for sub in subdirs:
+        base = repo / sub
+        if not base.exists():
+            continue
+        for p in base.rglob('*'):
+            if is_ignored(p, ignore_dirs) or not p.is_file() or p.suffix not in {'.ts', '.js', '.dart'}:
+                continue
+            rel = relpath_posix(p, repo)
+            if not TRANSFER_HINT_RE.search(rel):
+                continue
+            txt = safe_read_text(p, max_bytes=220_000)
+            for word in sorted(interesting_words):
+                for m in re.finditer(r'\b' + re.escape(word) + r'\b', txt):
+                    line = txt[: m.start()].count('\n') + 1
+                    kind = 'event' if any(ch in word for ch in ('_', '-')) and word.islower() else 'hook'
+                    hints.append(TransferFileHint(file=rel, line=line, kind=kind, value=word))
+                    break
+    hints.sort(key=lambda h: (h.file, h.line, h.value))
+    return hints[:120]
+
+
 def file_dependency_details(edges: Dict[str, Set[str]], ranked: List[Tuple[str, int, int, int]]) -> Dict[str, List[str]]:
     top_files = [f for f, _, _, _ in ranked[:20]]
     details: Dict[str, List[str]] = {}
@@ -484,7 +527,7 @@ def render_fast_map(
     repo: Path,
     tree: List[str],
     manifests: List[str],
-    scripts_root: Dict[str, str],
+    scripts_root: Dict[str, Dict[str, str]],
     edges_ranked: List[Tuple[str, int, int, int]],
     edge_details: Dict[str, List[str]],
     symbols: List[SymbolDef],
@@ -500,6 +543,7 @@ def render_fast_map(
     routes: List[RouteDef],
     regs: List[RegisterCall],
     gateway_hints: Dict[str, List[str]],
+    transfer_flow_hints: List[TransferFileHint],
     fast_name: str,
     blast_name: str,
 ) -> List[str]:
@@ -608,6 +652,14 @@ def render_fast_map(
         lines.append("- (No gateway/event hints detected.)")
     lines.append("")
 
+    lines.append("## Transfer flow hooks / events")
+    if transfer_flow_hints:
+        for hint in transfer_flow_hints[:80]:
+            lines.append(f"- `{hint.value}` ({hint.kind}) at `{hint.file}:{hint.line}`")
+    else:
+        lines.append("- (No transfer-flow hooks/events detected.)")
+    lines.append("")
+
     lines.append("## File dependency hotspots (import graph)")
     if edges_ranked:
         lines.append("| file | out | in | total |")
@@ -641,7 +693,7 @@ def render_fast_map(
     lines.append("")
 
     lines.append("## Notes")
-    lines.append("- Output này tối ưu để AI đọc nhanh: entrypoints, env, route map, hotspots, symbol index.")
+    lines.append("- Output này tối ưu để AI đọc nhanh: entrypoints, env, route map, transfer hooks, hotspots, symbol index.")
     lines.append("- Với repo TypeScript lớn, bước tiếp theo là bật SCIP để có callers/callees chuẩn hơn.")
     return lines
 
@@ -734,6 +786,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
     env_used, env_declared, env_used_not_declared, env_declared_not_used = extract_env_map(repo, scan_subdirs, ignore_dirs)
     routes, regs = extract_routes(repo, scan_subdirs, ignore_dirs)
     gateway_hints = extract_gateway_hints(repo, scan_subdirs, ignore_dirs)
+    transfer_flow_hints = extract_transfer_flow_hints(repo, scan_subdirs, ignore_dirs)
     top_summary = top_level_summary(repo, ignore_dirs)
     module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
     edge_details = file_dependency_details(edges, ranked_files)
@@ -758,6 +811,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
         routes=routes,
         regs=regs,
         gateway_hints=gateway_hints,
+        transfer_flow_hints=transfer_flow_hints,
         fast_name=fast_name,
         blast_name=blast_name,
     )
