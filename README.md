@@ -1,13 +1,33 @@
 # graplite-scan (private)
 
-Local/offline scanning logic to generate two **in-repo** Markdown files:
-- `PROJECT_FAST_MAP.md`
-- `PROJECT_BLAST_RADIUS.md`
+Local/offline scanning logic to generate two **in-repo** Markdown files.
 
-## Usage
+## Smooth one-command usage
+
+From anywhere:
 
 ```bash
-python3 tools/graplite_scan.py --repo /path/to/repo --inplace
+/home/gone/.openclaw/workspace/graplite-scan/bin/graplite analyze /path/to/repo
+```
+
+Or if you're already inside the target repo:
+
+```bash
+/home/gone/.openclaw/workspace/graplite-scan/bin/graplite analyze .
+```
+
+Default short outputs:
+- `MAP.md`
+- `IMPACT.md`
+
+## Other modes
+
+```bash
+# longer project-style names
+/home/gone/.openclaw/workspace/graplite-scan/bin/graplite project .
+
+# legacy agent/claude naming
+/home/gone/.openclaw/workspace/graplite-scan/bin/graplite agent .
 ```
 
 ## References (optional)

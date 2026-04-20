@@ -10,12 +10,17 @@ Design goals:
 
 Usage examples:
   python3 tools/graplite_scan.py --repo /path/to/repo --inplace
+  python3 tools/graplite_scan.py --repo . --mode short
   python3 tools/graplite_scan.py --repo . --mode agent-claude
   python3 tools/graplite_scan.py --repo /path/to/repo --out /tmp/reportdir
 
 Default outputs:
   - PROJECT_FAST_MAP.md
   - PROJECT_BLAST_RADIUS.md
+
+Short mode outputs:
+  - MAP.md
+  - IMPACT.md
 
 Agent/Claude mode outputs:
   - AGENT_MAP.md
@@ -693,7 +698,7 @@ def main() -> None:
     ap.add_argument("--repo", default=".", help="Path to repo (default: current directory)")
     ap.add_argument("--out", default="", help="Output directory (default: repo root)")
     ap.add_argument("--inplace", action="store_true", help="Write into repo root (default behavior if --out omitted)")
-    ap.add_argument("--mode", choices=["project", "agent-claude"], default="project")
+    ap.add_argument("--mode", choices=["project", "agent-claude", "short"], default="project")
     ap.add_argument("--fast-file", default="", help="Override first output filename")
     ap.add_argument("--blast-file", default="", help="Override second output filename")
     args = ap.parse_args()
@@ -710,6 +715,9 @@ def main() -> None:
     if args.mode == "agent-claude":
         fast_name = args.fast_file or "AGENT_MAP.md"
         blast_name = args.blast_file or "CLAUDE_MAP.md"
+    elif args.mode == "short":
+        fast_name = args.fast_file or "MAP.md"
+        blast_name = args.blast_file or "IMPACT.md"
     else:
         fast_name = args.fast_file or "PROJECT_FAST_MAP.md"
         blast_name = args.blast_file or "PROJECT_BLAST_RADIUS.md"
