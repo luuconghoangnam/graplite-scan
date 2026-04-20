@@ -519,28 +519,69 @@ def extract_route_flow_hints(repo: Path) -> List[RouteFlowHint]:
                 lines.append(f'provider `{provider_rel}` via `{", ".join(matched)}`')
         return lines
 
+    def extract_balanced_block(text: str, start: int) -> str:
+        open_paren = 0
+        open_brace = 0
+        in_single = False
+        in_double = False
+        in_template = False
+        escaped = False
+        seen_paren = False
+        for idx in range(start, len(text)):
+            ch = text[idx]
+            if escaped:
+                escaped = False
+                continue
+            if ch == '\\':
+                escaped = True
+                continue
+            if in_single:
+                if ch == "'":
+                    in_single = False
+                continue
+            if in_double:
+                if ch == '"':
+                    in_double = False
+                continue
+            if in_template:
+                if ch == '`':
+                    in_template = False
+                continue
+            if ch == "'":
+                in_single = True
+                continue
+            if ch == '"':
+                in_double = True
+                continue
+            if ch == '`':
+                in_template = True
+                continue
+            if ch == '(':
+                open_paren += 1
+                seen_paren = True
+            elif ch == ')':
+                open_paren = max(0, open_paren - 1)
+            elif ch == '{':
+                open_brace += 1
+            elif ch == '}':
+                open_brace = max(0, open_brace - 1)
+            elif ch == ';' and seen_paren and open_paren == 0 and open_brace == 0:
+                return text[start:idx + 1]
+        return text[start:]
+
     helper_blocks: Dict[str, str] = {}
-    helper_matches = []
     for helper_name in ('createUploadHandler', 'createDownloadHandler'):
         helper_match = re.search(r'const\s+' + re.escape(helper_name) + r'\s*=\s*async\s*\(', controller_txt)
         if helper_match:
-            helper_matches.append((helper_name, helper_match.start()))
-    helper_matches.sort(key=lambda x: x[1])
-    for idx, (helper_name, start) in enumerate(helper_matches):
-        next_start = helper_matches[idx + 1][1] if idx + 1 < len(helper_matches) else controller_txt.find('\n\n  app.', start)
-        if next_start == -1:
-            next_start = len(controller_txt)
-        helper_blocks[helper_name] = controller_txt[start:next_start]
+            helper_blocks[helper_name] = extract_balanced_block(controller_txt, helper_match.start())
 
     route_matches = list(FASTIFY_ROUTE_RE.finditer(controller_txt))
     flow_hints: List[RouteFlowHint] = []
-    for idx, m in enumerate(route_matches):
+    for m in route_matches:
         route_method = m.group('method').upper()
         route_path = m.group('path')
         route_line = controller_txt[: m.start()].count('\n') + 1
-        start = m.start()
-        next_start = route_matches[idx + 1].start() if idx + 1 < len(route_matches) else len(controller_txt)
-        block = controller_txt[start:next_start]
+        block = extract_balanced_block(controller_txt, m.start())
 
         chain = [f'route `{route_method} {route_path}`', f'controller `{controller_rel}:{route_line}`']
         called: List[str] = []
@@ -548,12 +589,9 @@ def extract_route_flow_hints(repo: Path) -> List[RouteFlowHint]:
             if re.search(r'\bservice\.' + re.escape(name) + r'\b', block):
                 called.append(name)
 
-        helper_called = None
-        for helper_name in helper_blocks:
+        for helper_name, helper_block in helper_blocks.items():
             if re.search(r'\b' + re.escape(helper_name) + r'\s*\(', block):
-                helper_called = helper_name
                 chain.append(f'handler `{helper_name}()`')
-                helper_block = helper_blocks[helper_name]
                 for name in method_names:
                     if re.search(r'\bservice\.' + re.escape(name) + r'\b', helper_block):
                         called.append(name)
