@@ -1,0 +1,3 @@
+# Keep graplite-scan clean: don't commit large cloned references or generated outputs
+references/
+output/
