@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+SCRIPT_PATH=$(readlink -f "${BASH_SOURCE[0]}")
+ROOT=$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)
 FIRST="${1:-}"
+
+print_help() {
+  cat <<'EOF'
+Usage:
+  graplite                   # analyze current repo -> MAP.md + IMPACT.md
+  graplite .                 # same as above
+  graplite /path/to/repo     # analyze target repo -> MAP.md + IMPACT.md
+  graplite analyze [repo]
+  graplite project [repo]
+  graplite agent [repo]
+  graplite doctor
+  graplite install
+  graplite help
+EOF
+}
 
 # Smooth default:
 #   graplite
@@ -32,16 +48,16 @@ case "$FIRST" in
     shift || true
     exec python3 "$ROOT/tools/graplite_scan.py" --repo "$REPO" --mode agent-claude "$@"
     ;;
+  doctor)
+    shift || true
+    exec python3 "$ROOT/tools/graplite_doctor.py" "$@"
+    ;;
+  install)
+    shift || true
+    exec python3 "$ROOT/tools/graplite_install.py" "$@"
+    ;;
   help|-h|--help)
-    cat <<'EOF'
-Usage:
-  graplite                   # analyze current repo -> MAP.md + IMPACT.md
-  graplite .                 # same as above
-  graplite /path/to/repo     # analyze target repo -> MAP.md + IMPACT.md
-  graplite analyze [repo]
-  graplite project [repo]
-  graplite agent [repo]
-EOF
+    print_help
     ;;
   *)
     # Treat first arg as repo path for the smoothest UX.

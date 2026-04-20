@@ -7,31 +7,49 @@ Local/offline scanning logic to generate two **in-repo** Markdown files.
 If you're already inside the target repo:
 
 ```bash
-/home/gone/.openclaw/workspace/graplite-scan/bin/graplite
+graplite
 ```
 
 Or:
 
 ```bash
-/home/gone/.openclaw/workspace/graplite-scan/bin/graplite .
-/home/gone/.openclaw/workspace/graplite-scan/bin/graplite /path/to/repo
+graplite .
+graplite /path/to/repo
 ```
 
 Default outputs (full detailed mode with short names):
 - `MAP.md`
 - `IMPACT.md`
 
+## Install once
+
+```bash
+python3 tools/graplite_install.py
+```
+
+Or via wrapper command:
+
+```bash
+./bin/graplite install
+```
+
+## Doctor
+
+```bash
+graplite doctor
+```
+
 ## Explicit modes
 
 ```bash
 # same default output names
-/home/gone/.openclaw/workspace/graplite-scan/bin/graplite analyze .
+graplite analyze .
 
 # longer project-style names
-/home/gone/.openclaw/workspace/graplite-scan/bin/graplite project .
+graplite project .
 
 # legacy agent/claude naming
-/home/gone/.openclaw/workspace/graplite-scan/bin/graplite agent .
+graplite agent .
 ```
 
 ## Optional shell alias
@@ -40,14 +58,6 @@ Source this file in your shell startup:
 
 ```bash
 source /home/gone/.openclaw/workspace/graplite-scan/shell/graplite.sh
-```
-
-Then just run:
-
-```bash
-graplite
-graplite .
-graplite /path/to/repo
 ```
 
 ## References (optional)
