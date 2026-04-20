@@ -108,6 +108,24 @@ FASTIFY_ROUTE_RE = re.compile(
 REGISTER_ROUTE_RE = re.compile(r"\b(register[A-Za-z0-9_]*(?:Routes|Gateway))\s*\(")
 WS_EVENT_RE = re.compile(r"['\"]([A-Za-z0-9:_\-]+)['\"]")
 TRANSFER_HINT_RE = re.compile(r"transfer|gateway|websocket|socket|peer", re.I)
+DIR_RESP_HINTS = {
+    'backend': 'server/backend logic',
+    'server': 'server/backend logic',
+    'src': 'primary source tree',
+    'app': 'application / UI layer',
+    'frontend': 'application / UI layer',
+    'web': 'web app / frontend assets',
+    'client': 'client-side code',
+    'lib': 'shared/library source',
+    'docs': 'architecture notes, plans, docs',
+    'scripts': 'automation / helper scripts',
+    'tools': 'developer tooling',
+    'infra': 'CI/deploy/infrastructure',
+    'packages': 'multi-package workspace',
+    'services': 'service modules',
+    'test': 'tests',
+    'tests': 'tests',
+}
 
 
 @dataclass
@@ -323,7 +341,7 @@ def compute_degree_centrality(edges: Dict[str, Set[str]]) -> List[Tuple[str, int
     return ranked
 
 
-def extract_env_map(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) -> Tuple[List[str], List[str]]:
+def extract_env_map(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) -> Tuple[List[str], List[str], List[str], List[str]]:
     used: Set[str] = set()
     declared: Set[str] = set()
 
@@ -339,13 +357,17 @@ def extract_env_map(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) -
             txt = safe_read_text(p)
             used.update(ENV_USAGE_RE.findall(txt))
 
-    for env_name in (".env.example", ".env"):
+    for env_name in (".env.example", ".env", "backend/.env.example", "backend/.env", "app/.env.example", "app/.env"):
         p = repo / env_name
         if p.exists():
             txt = safe_read_text(p)
             declared.update(ENV_KEY_LINE_RE.findall(txt))
 
-    return sorted(used), sorted(declared)
+    used_list = sorted(used)
+    declared_list = sorted(declared)
+    used_not_declared = sorted(used - declared)
+    declared_not_used = sorted(declared - used)
+    return used_list, declared_list, used_not_declared, declared_not_used
 
 
 def extract_routes(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) -> Tuple[List[RouteDef], List[RegisterCall]]:
@@ -391,26 +413,56 @@ def extract_gateway_hints(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[s
     return out
 
 
+def file_dependency_details(edges: Dict[str, Set[str]], ranked: List[Tuple[str, int, int, int]]) -> Dict[str, List[str]]:
+    top_files = [f for f, _, _, _ in ranked[:20]]
+    details: Dict[str, List[str]] = {}
+    reverse: Dict[str, List[str]] = defaultdict(list)
+    for src, dests in edges.items():
+        for d in dests:
+            reverse[d].append(src)
+    for f in top_files:
+        deps = sorted(edges.get(f, set()))[:12]
+        revs = sorted(reverse.get(f, []))[:12]
+        lines: List[str] = []
+        if deps:
+            lines.append('depends on: ' + ', '.join(f'`{d}`' for d in deps))
+        if revs:
+            lines.append('used by: ' + ', '.join(f'`{r}`' for r in revs))
+        if lines:
+            details[f] = lines
+    return details
+
+
 def top_level_summary(repo: Path, ignore_dirs: Set[str]) -> List[Tuple[str, str]]:
     summaries: List[Tuple[str, str]] = []
     for p in sorted(repo.iterdir(), key=lambda x: x.name.lower()):
         if p.name in ignore_dirs:
             continue
         if p.is_dir():
-            desc = "directory"
-            name = p.name.lower()
-            if name in {"src", "backend", "server", "api"}:
-                desc = "server/backend logic"
-            elif name in {"app", "frontend", "web", "client"}:
-                desc = "application / UI layer"
-            elif name in {"docs", "documentation"}:
-                desc = "architecture notes, plans, docs"
-            elif name in {"scripts", "bin", "tools"}:
-                desc = "automation / helper scripts"
-            elif name in {"infra", "deploy", ".github"}:
-                desc = "CI/deploy/infrastructure"
-            summaries.append((p.name + "/", desc))
+            desc = DIR_RESP_HINTS.get(p.name.lower(), 'directory')
+            summaries.append((p.name + '/', desc))
     return summaries
+
+
+def nested_module_summary(repo: Path, roots: Sequence[str], ignore_dirs: Set[str]) -> List[Tuple[str, str]]:
+    out: List[Tuple[str, str]] = []
+    for root in roots:
+        base = repo / root
+        if not base.exists() or not base.is_dir():
+            continue
+        try:
+            items = sorted(base.iterdir(), key=lambda p: p.name.lower())
+        except Exception:
+            continue
+        for p in items:
+            if p.name in ignore_dirs:
+                continue
+            if not p.is_dir():
+                continue
+            rel = relpath_posix(p, repo) + '/'
+            desc = DIR_RESP_HINTS.get(p.name.lower(), 'module / feature group')
+            out.append((rel, desc))
+    return out
 
 
 def approx_symbol_scores(symbols: List[SymbolDef], file_lang: Dict[str, str], repo: Path) -> Dict[str, int]:
@@ -434,13 +486,17 @@ def render_fast_map(
     manifests: List[str],
     scripts_root: Dict[str, str],
     edges_ranked: List[Tuple[str, int, int, int]],
+    edge_details: Dict[str, List[str]],
     symbols: List[SymbolDef],
     symbol_scores: Dict[str, int],
     top_summary: List[Tuple[str, str]],
+    module_summary: List[Tuple[str, str]],
     backend_entry: Optional[str],
     flutter_entry: Optional[str],
     env_used: List[str],
     env_declared: List[str],
+    env_used_not_declared: List[str],
+    env_declared_not_used: List[str],
     routes: List[RouteDef],
     regs: List[RegisterCall],
     gateway_hints: Dict[str, List[str]],
@@ -464,6 +520,14 @@ def render_fast_map(
     lines.append("## Top-level structure & purpose")
     for name, desc in top_summary[:30]:
         lines.append(f"- `{name}` — {desc}")
+    lines.append("")
+
+    lines.append("## Module / feature groups")
+    if module_summary:
+        for name, desc in module_summary[:80]:
+            lines.append(f"- `{name}` — {desc}")
+    else:
+        lines.append("- (No nested module groups detected.)")
     lines.append("")
 
     lines.append("## Repo layout (depth≈3)")
@@ -508,6 +572,14 @@ def render_fast_map(
         for key in env_declared[:80]:
             suffix = " (used)" if key in env_used else ""
             lines.append(f"- `{key}`{suffix}")
+    if env_used_not_declared:
+        lines.append("### Used in code but not declared in env files")
+        for key in env_used_not_declared[:80]:
+            lines.append(f"- `{key}`")
+    if env_declared_not_used:
+        lines.append("### Declared in env files but not referenced in scanned code")
+        for key in env_declared_not_used[:80]:
+            lines.append(f"- `{key}`")
     if not env_used and not env_declared:
         lines.append("- (No env usage/declarations detected.)")
     lines.append("")
@@ -542,6 +614,12 @@ def render_fast_map(
         lines.append("|---|---:|---:|---:|")
         for f, o, i, t in edges_ranked[:40]:
             lines.append(f"| `{f}` | {o} | {i} | {t} |")
+        lines.append("")
+        lines.append("### Dependency detail for top files")
+        for f in list(edge_details.keys())[:20]:
+            lines.append(f"#### `{f}`")
+            for detail in edge_details[f]:
+                lines.append(f"- {detail}")
     else:
         lines.append("- (No import edges detected in scanned code.)")
     lines.append("")
@@ -653,10 +731,12 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
     files_for_symbols = list(file_lang.keys())
     symbols = extract_symbols(repo, files_for_symbols, file_lang, ignore_dirs)
     symbol_scores = approx_symbol_scores(symbols, file_lang, repo) if symbols else {}
-    env_used, env_declared = extract_env_map(repo, scan_subdirs, ignore_dirs)
+    env_used, env_declared, env_used_not_declared, env_declared_not_used = extract_env_map(repo, scan_subdirs, ignore_dirs)
     routes, regs = extract_routes(repo, scan_subdirs, ignore_dirs)
     gateway_hints = extract_gateway_hints(repo, scan_subdirs, ignore_dirs)
     top_summary = top_level_summary(repo, ignore_dirs)
+    module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
+    edge_details = file_dependency_details(edges, ranked_files)
 
     fast_lines = render_fast_map(
         repo=repo,
@@ -664,13 +744,17 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
         manifests=manifests,
         scripts_root=scripts_map,
         edges_ranked=ranked_files,
+        edge_details=edge_details,
         symbols=symbols,
         symbol_scores=symbol_scores,
         top_summary=top_summary,
+        module_summary=module_summary,
         backend_entry=backend_entry,
         flutter_entry=flutter_entry,
         env_used=env_used,
         env_declared=env_declared,
+        env_used_not_declared=env_used_not_declared,
+        env_declared_not_used=env_declared_not_used,
         routes=routes,
         regs=regs,
         gateway_hints=gateway_hints,
