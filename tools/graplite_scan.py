@@ -102,8 +102,8 @@ DART_DEF_RES = [
 ENV_USAGE_RE = re.compile(r"process\.env\.([A-Z0-9_]+)")
 ENV_KEY_LINE_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]+)\s*=.*$", re.M)
 FASTIFY_ROUTE_RE = re.compile(
-    r"(?P<target>\bapp|\bserver|\brouter|\bfastify)\.(?P<method>get|post|put|delete|patch|options|head)\s*\(\s*['\"](?P<path>[^'\"]+)['\"]",
-    re.I,
+    r"(?P<target>\bapp|\bserver|\brouter|\bfastify)\.(?P<method>get|post|put|delete|patch|options|head)\s*(?:<[^>]*>)?\s*\(\s*['\"](?P<path>[^'\"]+)['\"]",
+    re.I | re.S,
 )
 REGISTER_ROUTE_RE = re.compile(r"\b(register[A-Za-z0-9_]*(?:Routes|Gateway))\s*\(")
 WS_EVENT_RE = re.compile(r"['\"]([A-Za-z0-9:_\-]+)['\"]")
@@ -162,6 +162,15 @@ class TransferFileHint:
     line: int
     kind: str
     value: str
+
+
+@dataclass
+class RouteFlowHint:
+    method: str
+    path: str
+    file: str
+    line: int
+    chain: List[str]
 
 
 def is_ignored(path: Path, ignore_dirs: Set[str]) -> bool:
@@ -456,6 +465,81 @@ def extract_transfer_flow_hints(repo: Path, subdirs: Sequence[str], ignore_dirs:
     return hints[:120]
 
 
+def extract_route_flow_hints(repo: Path) -> List[RouteFlowHint]:
+    controller_rel = 'backend/src/modules/transfer/transfer.controller.ts'
+    service_rel = 'backend/src/modules/transfer/transfer.service.ts'
+    provider_candidates = [
+        'backend/src/modules/transfer/chunk-url-provider.ts',
+        'backend/src/modules/transfer/r2-url-provider.ts',
+    ]
+    controller = repo / controller_rel
+    service = repo / service_rel
+    if not controller.exists() or not service.exists():
+        return []
+
+    controller_txt = safe_read_text(controller, max_bytes=220_000)
+    service_txt = safe_read_text(service, max_bytes=320_000)
+    provider_hits: Dict[str, List[str]] = {}
+    for rel in provider_candidates:
+        p = repo / rel
+        if not p.exists():
+            continue
+        txt = safe_read_text(p, max_bytes=180_000)
+        hits = []
+        for name in ('getUploadUrl', 'getDownloadUrl', 'deleteChunk', 'cleanupSession', 'chunkExists'):
+            if re.search(r'\b' + re.escape(name) + r'\b', txt):
+                hits.append(name)
+        if hits:
+            provider_hits[rel] = hits
+
+    method_names = [
+        'createSession', 'attachReceiver', 'touchSession', 'getChunkUploadUrl',
+        'getChunkDownloadUrl', 'deleteChunk', 'getSession', 'getCompletionFlags',
+        'completeSession', 'markSessionCanceled'
+    ]
+
+    route_matches = list(FASTIFY_ROUTE_RE.finditer(controller_txt))
+    flow_hints: List[RouteFlowHint] = []
+    for idx, m in enumerate(route_matches):
+        route_method = m.group('method').upper()
+        route_path = m.group('path')
+        route_line = controller_txt[: m.start()].count('\n') + 1
+        start = m.start()
+        next_start = route_matches[idx + 1].start() if idx + 1 < len(route_matches) else len(controller_txt)
+        block = controller_txt[start:next_start]
+
+        chain = [f'route `{route_method} {route_path}`', f'controller `{controller_rel}:{route_line}`']
+        called = []
+        for name in method_names:
+            if re.search(r'\bservice\.' + re.escape(name) + r'\b', block):
+                called.append(name)
+        seen = set()
+        for name in called:
+            if name in seen:
+                continue
+            seen.add(name)
+            svc_match = re.search(r'\b' + re.escape(name) + r'\s*\(', service_txt)
+            if svc_match:
+                svc_line = service_txt[: svc_match.start()].count('\n') + 1
+                chain.append(f'service `{name}()` at `{service_rel}:{svc_line}`')
+                provider_links = []
+                if name == 'getChunkUploadUrl':
+                    provider_links.append('getUploadUrl')
+                elif name == 'getChunkDownloadUrl':
+                    provider_links.extend(['chunkExists', 'getDownloadUrl'])
+                elif name == 'deleteChunk':
+                    provider_links.append('deleteChunk')
+                elif name == 'completeSession':
+                    provider_links.append('cleanupSession')
+                for provider_rel, hits in provider_hits.items():
+                    matched = [h for h in provider_links if h in hits]
+                    if matched:
+                        chain.append(f'provider `{provider_rel}` via `{", ".join(matched)}`')
+        flow_hints.append(RouteFlowHint(method=route_method, path=route_path, file=controller_rel, line=route_line, chain=chain))
+
+    return flow_hints[:40]
+
+
 def file_dependency_details(edges: Dict[str, Set[str]], ranked: List[Tuple[str, int, int, int]]) -> Dict[str, List[str]]:
     top_files = [f for f, _, _, _ in ranked[:20]]
     details: Dict[str, List[str]] = {}
@@ -544,6 +628,7 @@ def render_fast_map(
     regs: List[RegisterCall],
     gateway_hints: Dict[str, List[str]],
     transfer_flow_hints: List[TransferFileHint],
+    route_flow_hints: List[RouteFlowHint],
     fast_name: str,
     blast_name: str,
 ) -> List[str]:
@@ -658,6 +743,16 @@ def render_fast_map(
             lines.append(f"- `{hint.value}` ({hint.kind}) at `{hint.file}:{hint.line}`")
     else:
         lines.append("- (No transfer-flow hooks/events detected.)")
+    lines.append("")
+
+    lines.append("## Route → controller → service → provider chains")
+    if route_flow_hints:
+        for item in route_flow_hints[:40]:
+            lines.append(f"### `{item.method} {item.path}`")
+            for step in item.chain:
+                lines.append(f"- {step}")
+    else:
+        lines.append("- (No route flow chains detected.)")
     lines.append("")
 
     lines.append("## File dependency hotspots (import graph)")
@@ -787,6 +882,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
     routes, regs = extract_routes(repo, scan_subdirs, ignore_dirs)
     gateway_hints = extract_gateway_hints(repo, scan_subdirs, ignore_dirs)
     transfer_flow_hints = extract_transfer_flow_hints(repo, scan_subdirs, ignore_dirs)
+    route_flow_hints = extract_route_flow_hints(repo)
     top_summary = top_level_summary(repo, ignore_dirs)
     module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
     edge_details = file_dependency_details(edges, ranked_files)
@@ -812,6 +908,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
         regs=regs,
         gateway_hints=gateway_hints,
         transfer_flow_hints=transfer_flow_hints,
+        route_flow_hints=route_flow_hints,
         fast_name=fast_name,
         blast_name=blast_name,
     )
