@@ -1322,6 +1322,11 @@ def render_blast_map(
         keywords = extract_route_keywords(chain)
         keyword_set = {kw.lower() for kw in keywords}
         service_keywords = {kw.lower() for kw in keywords if kw and kw[0].islower()}
+        strong_route_terms = {
+            'uploadurl', 'downloadurl', 'deletechunk', 'cleanupsession', 'attachreceiver',
+            'createsession', 'touchsession', 'completesession', 'getsession', 'getcompletionflags'
+        }
+        has_explicit_route_method = bool(service_keywords)
         ranked: List[Tuple[int, str]] = []
         seen: Set[str] = set()
         for file_path in impacted:
@@ -1343,16 +1348,19 @@ def render_blast_map(
                 is_typeish = any(token in symbol for token in ('TransferMetadata#', 'TransferFileDescriptor#', 'TransferSession#'))
                 is_service_file = file_path.endswith('service.ts')
                 is_provider_file = file_path.endswith('provider.ts')
+                is_controller_file = file_path.endswith('controller.ts')
 
                 if is_method:
-                    score += 16
+                    score += 18
                 elif is_field:
-                    score += 3
+                    score += 1
 
                 if is_provider_file:
-                    score += 6
+                    score += 8
                 elif is_service_file:
-                    score += 4
+                    score += 6
+                elif is_controller_file:
+                    score += 2
 
                 exact_matches = 0
                 partial_matches = 0
@@ -1361,62 +1369,80 @@ def render_blast_map(
                         exact_matches += 1
                     elif kw in lower_symbol:
                         partial_matches += 1
-                score += exact_matches * 34
+                score += exact_matches * 40
                 score += partial_matches * 10
 
                 if is_service_file and exact_matches:
-                    score += 18
+                    score += 20
                 if is_provider_file and exact_matches:
-                    score += 12
+                    score += 16
+
+                if any(term in lower_symbol for term in strong_route_terms):
+                    score += 10
+                if lower_name in strong_route_terms:
+                    score += 16
 
                 if is_constant:
-                    score -= 12
+                    score -= 16
                 if is_typeish and not exact_matches:
-                    score -= 10
+                    score -= 16
                 if is_field and not exact_matches:
+                    score -= 14
+                if has_explicit_route_method and is_field:
+                    score -= 10
+                if has_explicit_route_method and is_constant:
                     score -= 8
-
-                if any(term in lower_symbol for term in ('uploadurl', 'downloadurl', 'deletechunk', 'cleanupsession', 'attachreceiver', 'createsession', 'touchsession', 'completesession', 'getsession', 'getcompletionflags')):
-                    score += 8
 
                 if is_service_file:
                     if 'createsession' in service_keywords:
                         if 'createsession' in lower_symbol:
-                            score += 30
+                            score += 34
                         if any(t in lower_symbol for t in ('createsessionresult', 'transfersession', 'pairingcode')):
-                            score += 16
-                        if 'transferfiledescriptor' in lower_symbol:
-                            score -= 10
-                        if 'transfermetadata' in lower_symbol:
-                            score -= 2
-                    if 'attachreceiver' in service_keywords:
-                        if 'attachreceiver' in lower_symbol:
-                            score += 30
-                        if any(t in lower_symbol for t in ('receiver', 'transfersession', 'pairingcode')):
-                            score += 14
+                            score += 12
                         if 'transferfiledescriptor' in lower_symbol:
                             score -= 12
                         if 'transfermetadata' in lower_symbol:
-                            score -= 4
+                            score -= 6
+                    if 'attachreceiver' in service_keywords:
+                        if 'attachreceiver' in lower_symbol:
+                            score += 34
+                        if any(t in lower_symbol for t in ('receiver', 'transfersession', 'pairingcode')):
+                            score += 10
+                        if 'transferfiledescriptor' in lower_symbol:
+                            score -= 14
+                        if 'transfermetadata' in lower_symbol:
+                            score -= 8
                     if 'completesession' in service_keywords:
                         if 'completesession' in lower_symbol:
-                            score += 28
+                            score += 34
                         if any(t in lower_symbol for t in ('getcompletionflags', 'sendercompleted', 'receivercompleted', 'transfersession')):
-                            score += 14
+                            score += 16
                         if 'transferfiledescriptor' in lower_symbol:
-                            score -= 10
+                            score -= 12
                     if 'getsession' in service_keywords and ('getsession' in lower_symbol or 'transfersession' in lower_symbol):
-                        score += 12
+                        score += 18
                     if 'touchsession' in service_keywords and ('touchsession' in lower_symbol or 'lastactivity' in lower_symbol):
-                        score += 10
-                    if 'getchunkuploadurl' in service_keywords and 'transferfiledescriptor' in lower_symbol:
-                        score += 10
-                    if 'getchunkdownloadurl' in service_keywords and 'transferfiledescriptor' in lower_symbol:
-                        score += 8
-                    if 'deletechunk' in service_keywords and 'transferfiledescriptor' in lower_symbol:
-                        score += 6
+                        score += 18
+                    if 'getchunkuploadurl' in service_keywords and ('getchunkuploadurl' in lower_symbol or 'getuploadurl' in lower_symbol):
+                        score += 22
+                    if 'getchunkdownloadurl' in service_keywords and ('getchunkdownloadurl' in lower_symbol or 'getdownloadurl' in lower_symbol):
+                        score += 22
+                    if 'deletechunk' in service_keywords and 'deletechunk' in lower_symbol:
+                        score += 20
                     if container_name in {'transferservice', 'createsessionresult'}:
                         score += 6
+
+                if is_provider_file:
+                    if 'getchunkuploadurl' in service_keywords and 'getuploadurl' in lower_symbol:
+                        score += 26
+                    if 'getchunkdownloadurl' in service_keywords and 'getdownloadurl' in lower_symbol:
+                        score += 26
+                    if 'deletechunk' in service_keywords and 'deletechunk' in lower_symbol:
+                        score += 24
+                    if 'completesession' in service_keywords and 'cleanupsession' in lower_symbol:
+                        score += 24
+                    if 'attachreceiver' in service_keywords and 'attachreceiver' not in lower_symbol:
+                        score -= 6
 
                 if score <= 0 and not is_method:
                     continue
