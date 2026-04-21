@@ -2654,6 +2654,11 @@ def render_blast_map(
             return True
         return False
 
+    reverse_edges: Dict[str, List[str]] = defaultdict(list)
+    for src, dests in edges.items():
+        for dest in dests:
+            reverse_edges[dest].append(src)
+
     def build_app_feature_flow_map() -> List[Tuple[str, List[str], List[str], List[str]]]:
         explicit_feature_files = [
             'app/lib/features/send/send_page.dart',
@@ -2747,6 +2752,39 @@ def render_blast_map(
                     frontend_spine.append(dep)
             flow_rows.append((file_path, prioritized_side_effects[:8], supporting_links[:8], frontend_spine[:8]))
         return flow_rows
+
+    def build_frontend_shared_surface_map() -> List[Tuple[int, str, List[str], List[str], List[str]]]:
+        candidates: List[Tuple[int, str, List[str], List[str], List[str]]] = []
+        seen: Set[str] = set()
+        for file_path in set(edges.keys()) | set(reverse_edges.keys()):
+            lower = file_path.lower()
+            if file_path in seen:
+                continue
+            if not lower.endswith(('.tsx', '.jsx', '.ts', '.js', '.vue', '.dart')):
+                continue
+            if any(token in lower for token in ('spec.', 'test.', '.d.ts', '__tests__/')):
+                continue
+            is_shared_surface = any(token in lower for token in (
+                '/components/', '/widgets/', '/layouts/', '/hooks/', '/stores/', '/state/',
+                '/composables/', '/context/', '/reducers/', '/core/widgets/', '/core/theme/'
+            ))
+            if not is_shared_surface:
+                continue
+            consumers = sorted(reverse_edges.get(file_path, []))
+            if not consumers:
+                continue
+            page_consumers = [c for c in consumers if any(token in c.lower() for token in ('/pages/', '/routes/', '/app/', '/features/', 'page.', 'layout.', 'screen.', 'view.'))]
+            state_consumers = [c for c in consumers if any(token in c.lower() for token in ('/hooks/', '/stores/', '/state/', '/composables/', '/context/', '/reducers/'))]
+            component_consumers = [c for c in consumers if any(token in c.lower() for token in ('/components/', '/widgets/'))]
+            score = len(consumers) + (len(page_consumers) * 2) + len(state_consumers)
+            if '/layouts/' in lower or 'layout.' in lower:
+                score += 3
+            if '/stores/' in lower or '/state/' in lower or '/hooks/' in lower:
+                score += 2
+            candidates.append((score, file_path, page_consumers[:6], state_consumers[:6], component_consumers[:6]))
+            seen.add(file_path)
+        candidates.sort(key=lambda item: (-item[0], item[1]))
+        return candidates[:10]
 
     def business_risk_profile(file_path: str, out_degree: int, in_degree: int) -> Tuple[int, List[str]]:
         score = out_degree + in_degree
@@ -3073,6 +3111,29 @@ def render_blast_map(
                 lines.append(f"- Structured symbols in file: {', '.join(f'`{item}`' for item in app_symbols[:6])}")
     else:
         lines.append("- (No frontend/app-side feature flow map detected yet.)")
+    lines.append("")
+
+    lines.append("## Shared frontend component / state blast radius")
+    shared_frontend_surface = build_frontend_shared_surface_map()
+    if shared_frontend_surface:
+        for score, file_path, page_consumers, state_consumers, component_consumers in shared_frontend_surface[:8]:
+            lines.append(f"### If changing `{file_path}`")
+            lines.append(f"- Shared-surface score: `{score}`")
+            if page_consumers:
+                lines.append(f"- User-visible consumers: {', '.join(f'`{item}`' for item in page_consumers[:6])}")
+            if state_consumers:
+                lines.append(f"- State/runtime consumers: {', '.join(f'`{item}`' for item in state_consumers[:6])}")
+            if component_consumers:
+                lines.append(f"- Component/UI consumers: {', '.join(f'`{item}`' for item in component_consumers[:6])}")
+            lower = file_path.lower()
+            if any(token in lower for token in ('/layouts/', 'layout.')):
+                lines.append("- Likely app-shell impact: layout composition or route framing may shift")
+            elif any(token in lower for token in ('/hooks/', '/stores/', '/state/', '/composables/', '/context/')):
+                lines.append("- Likely cross-feature state impact: shared effects, selectors, or client data flow may shift")
+            else:
+                lines.append("- Likely shared UI impact: multiple routes/features may inherit rendering or prop behavior changes")
+    else:
+        lines.append("- (No shared frontend component/state surfaces detected yet.)")
     lines.append("")
 
     lines.append("## Flow-aware impact map")
