@@ -3223,25 +3223,31 @@ def render_blast_map(
             consumers = sorted(reverse_edges.get(canonical_view, []) + reverse_edges.get(canonical_view + '.cs', []))
             all_candidates = set(candidate_pool)
 
-            def append_matches(bucket: List[str], names: Iterable[str], hints: Sequence[str]) -> None:
+            def append_matches(bucket: List[str], names: Iterable[str], hints: Sequence[str], kind: str) -> None:
+                expected_suffix = {
+                    'viewmodel': 'viewmodel',
+                    'service': 'service',
+                    'command': 'command',
+                }.get(kind, '')
                 for raw_name in names:
                     name = raw_name.split('.')[-1].lower().replace('model', 'viewmodel')
                     if not name:
                         continue
                     variants = [name]
-                    for suffix in ('viewmodel', 'service', 'command'):
-                        if name.endswith(suffix):
-                            trimmed = name[:-len(suffix)]
-                            if trimmed:
-                                variants.append(trimmed)
+                    if expected_suffix and name.endswith(expected_suffix):
+                        trimmed = name[:-len(expected_suffix)]
+                        if trimmed:
+                            variants.append(trimmed)
                     for candidate in all_candidates:
                         lower_candidate = candidate.lower()
                         if not lower_candidate.endswith('.cs'):
                             continue
                         candidate_stem = Path(lower_candidate).stem.lower()
+                        kind_match = any(hint in lower_candidate for hint in hints)
+                        if expected_suffix and expected_suffix not in candidate_stem and not kind_match:
+                            continue
                         name_match = any(variant and (variant in candidate_stem or variant in lower_candidate) for variant in variants)
-                        hint_match = any(hint in lower_candidate for hint in hints)
-                        if name_match or (hint_match and any(variant and variant in lower_candidate for variant in variants)):
+                        if name_match and (kind_match or not expected_suffix or expected_suffix in candidate_stem):
                             if candidate not in bucket:
                                 bucket.append(candidate)
 
@@ -3264,8 +3270,8 @@ def render_blast_map(
             service_links = [dep for dep in deps if '/Services/' in dep or dep.endswith('Service.cs')]
             command_links = [dep for dep in deps if '/Commands/' in dep or dep.endswith('Command.cs')]
             control_links = [dep for dep in deps if '/Controls/' in dep or dep.endswith('.xaml') and '/Views/' not in dep]
-            append_matches(vm_links, (m.group('name') for m in XAML_DATACONTEXT_RE.finditer(txt)), ('/viewmodels/', 'viewmodel'))
-            append_matches(vm_links, (m.group('name') for m in XAML_VM_TYPE_RE.finditer(txt) if m.group('prefix').lower() in {'vm', 'viewmodels', 'viewmodel'}), ('/viewmodels/', 'viewmodel'))
+            append_matches(vm_links, (m.group('name') for m in XAML_DATACONTEXT_RE.finditer(txt)), ('/viewmodels/', 'viewmodel'), 'viewmodel')
+            append_matches(vm_links, (m.group('name') for m in XAML_VM_TYPE_RE.finditer(txt) if m.group('prefix').lower() in {'vm', 'viewmodels', 'viewmodel'}), ('/viewmodels/', 'viewmodel'), 'viewmodel')
             view_stem = Path(canonical_view).stem.replace('.xaml', '')
             if view_stem:
                 sibling_vm_name = f"{view_stem}ViewModel.cs".lower()
@@ -3275,7 +3281,7 @@ def render_blast_map(
                         if candidate not in vm_links:
                             vm_links.append(candidate)
             xaml_command_names = [m.group('name') for m in XAML_COMMAND_RE.finditer(txt)]
-            append_matches(command_links, xaml_command_names, ('/commands/', 'command'))
+            append_matches(command_links, xaml_command_names, ('/commands/', 'command'), 'command')
             append_files_containing(vm_links, xaml_command_names, [candidate for candidate in all_candidates if '/ViewModels/' in candidate or candidate.endswith('ViewModel.cs')])
             codebehind_txt = safe_read_text(repo / (canonical_view + '.cs')) if (repo / (canonical_view + '.cs')).exists() else ''
             for m in CS_NEW_RE.finditer(codebehind_txt):
@@ -3298,11 +3304,11 @@ def render_blast_map(
             if ctor_match:
                 ctor_args = ctor_match.group('args')
                 arg_types = [arg.strip().split()[0] for arg in ctor_args.split(',') if arg.strip()]
-                append_matches(vm_links, arg_types, ('/viewmodels/', 'viewmodel'))
-                append_matches(service_links, arg_types, ('/services/', 'service'))
-                append_matches(command_links, arg_types, ('/commands/', 'command'))
+                append_matches(vm_links, arg_types, ('/viewmodels/', 'viewmodel'), 'viewmodel')
+                append_matches(service_links, arg_types, ('/services/', 'service'), 'service')
+                append_matches(command_links, arg_types, ('/commands/', 'command'), 'command')
             if CS_RELAY_COMMAND_RE.search(codebehind_txt):
-                append_matches(command_links, ['RelayCommand', 'DelegateCommand', 'AsyncRelayCommand', 'ReactiveCommand'], ('/commands/', 'command'))
+                append_matches(command_links, ['RelayCommand', 'DelegateCommand', 'AsyncRelayCommand', 'ReactiveCommand'], ('/commands/', 'command'), 'command')
             click_handlers = [m.group('name') for m in XAML_CLICK_RE.finditer(txt)]
             command_names = xaml_command_names
             codebehind_commands = [m.group('name') for m in CS_COMMAND_PROP_RE.finditer(codebehind_txt)]
@@ -3315,7 +3321,7 @@ def render_blast_map(
                 for vm_file in list(vm_links):
                     vm_txt = safe_read_text(repo / vm_file)
                     if any(re.search(r'\b' + re.escape(name) + r'\b', vm_txt) for name in command_names):
-                        append_matches(command_links, command_names, ('/commands/', 'command'))
+                        append_matches(command_links, command_names, ('/commands/', 'command'), 'command')
                         for dep in edges.get(vm_file, set()):
                             lower_dep = dep.lower()
                             if ('/services/' in dep or dep.endswith('Service.cs')) and dep not in service_links:
@@ -3327,7 +3333,7 @@ def render_blast_map(
                             if ('/commands/' in dep or dep.endswith('Command.cs')) and dep not in command_links:
                                 command_links.append(dep)
 
-            append_matches(command_links, assigned_command_kinds, ('/commands/', 'command'))
+            append_matches(command_links, assigned_command_kinds, ('/commands/', 'command'), 'command')
             score = len(vm_links) * 3 + len(service_links) * 2 + len(command_links) * 2 + len(control_links) + len(consumers)
             if canonical_view.lower().endswith('mainwindow.xaml'):
                 score += 4

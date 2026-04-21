@@ -94,8 +94,9 @@ Notes:
 - Fixed benchmark miss #4: sample-corpus repos (`desktop-mvvm`, `flutter-samples`) now emit repo-level architecture summaries instead of falling back to “No high-confidence architecture summary detected yet.”
 - Fixed benchmark miss #5: sample-corpus summaries now rank more representative roots first instead of leading with incidental samples
 - Fixed benchmark miss #6: multi-root desktop sample repos now correlate page views to concrete `ViewModel` files instead of staying shell-only
+- Fixed benchmark miss #7: fallback desktop output now separates `ViewModel` vs service vs command buckets more cleanly instead of duplicating the same file across all three
 - Next recommended slice:
-  - Separate desktop ViewModel vs service vs command buckets more cleanly in fallback mode
+  - Rebuild desktop service/command buckets from matched ViewModel code with stronger evidence
   - Add restrained module-group summaries for large sample corpora without flooding output
 
 ## Reference Repo Assessment

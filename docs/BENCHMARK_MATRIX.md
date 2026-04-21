@@ -405,7 +405,9 @@ Anti-noise checks:
 - Result after second fix: `MAP.md` now summarizes the repo as a desktop sample corpus instead of defaulting to “No high-confidence architecture summary detected yet.”
 - Third fix applied: desktop candidate discovery now scans `.xaml` / `ViewModel` / `Service` / `Command` files even when the repo has sparse import-graph evidence, and uses sibling page-name correlation to pull matching `ViewModel` files across sample roots.
 - Result after third fix: `IMPACT.md` now links pages like `AsyncRelayCommandPage.xaml`, `RelayCommandPage.xaml`, and `IoCPage.xaml` to concrete `MvvmSample.Core/ViewModels/*` files instead of leaving desktop flow mostly shell-only.
-- Remaining gap: service/command buckets still need finer type separation so matched `ViewModel` files are not echoed too broadly into all desktop dependency categories.
+- Fourth fix applied: fallback desktop matching now keeps `ViewModel`, `service`, and `command` buckets separated instead of echoing the same file into all categories.
+- Result after fourth fix: desktop output is narrower and less noisy; rows now primarily show concrete `ViewModel` links where that is the strongest evidence.
+- Remaining gap: add explicit service/command extraction from matched `ViewModel` code so those buckets can repopulate with stronger evidence instead of staying mostly empty.
 
 ### `flutter-samples`
 - First miss observed: scanner inventories the repo correctly, but architecture summary is too timid for a sample corpus and does not distinguish app-shaped Flutter subprojects from repo-level sample collection shape.
