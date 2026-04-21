@@ -1300,6 +1300,65 @@ def extract_symbol_name_from_label(label: str) -> str:
     return core.strip()
 
 
+def collect_route_boost_reasons(
+    hint: RouteFlowHint,
+    changed_aliases: Set[str],
+    changed_name_aliases: Dict[str, List[str]],
+    changed_range_name_aliases: Dict[str, List[str]],
+    scip_symbols_by_file: Dict[str, List[str]],
+) -> List[str]:
+    impacted_files: List[str] = []
+    for step in hint.chain:
+        for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
+            file_path = file_match.split(':', 1)[0]
+            if file_path not in impacted_files:
+                impacted_files.append(file_path)
+
+    route_keywords: Set[str] = set()
+    for step in hint.chain:
+        for m in re.finditer(r'`([A-Za-z_][A-Za-z0-9_]*)\(\)`', step):
+            route_keywords.add(m.group(1).lower())
+        for m in re.finditer(r'via `([^`]+)`', step):
+            parts = [p.strip() for p in m.group(1).split(',')]
+            for part in parts:
+                if part:
+                    route_keywords.add(part.lower())
+
+    reasons: List[str] = []
+    seen: Set[str] = set()
+
+    touched_files = [file_path for file_path in impacted_files if file_path in changed_aliases]
+    if touched_files:
+        text = f"touched files: {', '.join(f'`{item}`' for item in touched_files[:4])}"
+        if text not in seen:
+            seen.add(text)
+            reasons.append(text)
+
+    for impacted_file in impacted_files:
+        range_names = changed_range_name_aliases.get(impacted_file, [])
+        if range_names:
+            matched_range = [name for name in range_names if name.lower() in route_keywords]
+            if matched_range:
+                text = f"changed range near `{matched_range[0]}()` in `{impacted_file}`"
+                if text not in seen:
+                    seen.add(text)
+                    reasons.append(text)
+
+        candidate_names = changed_name_aliases.get(impacted_file, [])
+        if candidate_names:
+            for symbol in scip_symbols_by_file.get(impacted_file, []):
+                lower_symbol = symbol.lower()
+                matched_names = [name for name in candidate_names if name.lower() in lower_symbol]
+                if matched_names:
+                    text = f"heuristic diff symbol `{matched_names[0]}` matched `{impacted_file} :: {symbol}`"
+                    if text not in seen:
+                        seen.add(text)
+                        reasons.append(text)
+                    break
+
+    return reasons[:4]
+
+
 def render_fast_map(
     repo: Path,
     tree: List[str],
@@ -1876,6 +1935,7 @@ def render_blast_map(
 
     lines.append("## Route-centric impact")
     prioritized_route_flow_hints = route_flow_hints[:]
+    route_boost_reasons: Dict[str, List[str]] = {}
     if changed_files:
         changed_aliases: Set[str] = set()
         changed_name_aliases: Dict[str, List[str]] = defaultdict(list)
@@ -1926,10 +1986,23 @@ def render_blast_map(
             return (-range_symbol_hits, -symbol_hits, -touched, hint.method, route_label)
 
         prioritized_route_flow_hints = sorted(route_flow_hints, key=route_priority_key)
+        for hint in prioritized_route_flow_hints:
+            route_label = f"{hint.method} {hint.path}"
+            route_boost_reasons[route_label] = collect_route_boost_reasons(
+                hint,
+                changed_aliases,
+                changed_name_aliases,
+                changed_range_name_aliases,
+                scip_symbols_by_file,
+            )
 
     if route_flow_hints:
         for hint in prioritized_route_flow_hints[:12]:
-            lines.append(f"### `{hint.method} {hint.path}`")
+            route_label = f"{hint.method} {hint.path}"
+            lines.append(f"### `{route_label}`")
+            boost_reasons = route_boost_reasons.get(route_label, [])
+            if boost_reasons:
+                lines.append(f"- Boost reasons: {'; '.join(boost_reasons[:4])}")
             impacted = []
             for step in hint.chain:
                 for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
