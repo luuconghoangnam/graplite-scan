@@ -425,7 +425,81 @@ references/tree-sitter/lib/README.md
 - (No import edges detected in scanned code.)
 
 ## Symbol index (definitions + approx mentions)
-- (No symbols extracted. Tầng B/SCIP sẽ làm cái này chính xác hơn.)
+| kind | name | defined at | approx mentions elsewhere |
+|---|---|---|---:|
+| py:function | `main` | `tools/graplite_doctor.py:13` | 10 |
+| py:function | `main` | `tools/graplite_install.py:12` | 10 |
+| py:function | `main` | `tools/render_drops_maps.py:110` | 10 |
+| py:function | `main` | `tools/graplite_scan.py:2289` | 6 |
+| py:function | `rec` | `tools/graplite_scan.py:253` | 3 |
+| py:function | `rec` | `tools/render_drops_maps.py:28` | 3 |
+| py:function | `list_tree` | `tools/graplite_scan.py:249` | 2 |
+| py:function | `list_tree` | `tools/render_drops_maps.py:25` | 2 |
+| py:class | `SymbolDef` | `tools/graplite_scan.py:155` | 0 |
+| py:class | `RouteDef` | `tools/graplite_scan.py:164` | 0 |
+| py:class | `RegisterCall` | `tools/graplite_scan.py:172` | 0 |
+| py:class | `TransferFileHint` | `tools/graplite_scan.py:179` | 0 |
+| py:class | `RouteFlowHint` | `tools/graplite_scan.py:187` | 0 |
+| py:class | `ChangedLineRange` | `tools/graplite_scan.py:196` | 0 |
+| py:class | `ScipReadiness` | `tools/graplite_scan.py:202` | 0 |
+| py:class | `ScipIndexStatus` | `tools/graplite_scan.py:212` | 0 |
+| py:function | `is_ignored` | `tools/graplite_scan.py:231` | 0 |
+| py:function | `safe_read_text` | `tools/graplite_scan.py:235` | 0 |
+| py:function | `relpath_posix` | `tools/graplite_scan.py:245` | 0 |
+| py:function | `find_manifests` | `tools/graplite_scan.py:272` | 0 |
+| py:function | `parse_package_scripts` | `tools/graplite_scan.py:288` | 0 |
+| py:function | `detect_scan_subdirs` | `tools/graplite_scan.py:299` | 0 |
+| py:function | `resolve_ts_import` | `tools/graplite_scan.py:315` | 0 |
+| py:function | `resolve_dart_import` | `tools/graplite_scan.py:333` | 0 |
+| py:function | `build_import_graph` | `tools/graplite_scan.py:348` | 0 |
+| py:function | `extract_symbols` | `tools/graplite_scan.py:391` | 0 |
+| py:function | `compute_degree_centrality` | `tools/graplite_scan.py:414` | 0 |
+| py:function | `extract_env_map` | `tools/graplite_scan.py:427` | 0 |
+| py:function | `extract_routes` | `tools/graplite_scan.py:456` | 0 |
+| py:function | `extract_gateway_hints` | `tools/graplite_scan.py:477` | 0 |
+| py:function | `extract_transfer_flow_hints` | `tools/graplite_scan.py:499` | 0 |
+| py:function | `extract_route_flow_hints` | `tools/graplite_scan.py:530` | 0 |
+| py:function | `service_step_lines` | `tools/graplite_scan.py:564` | 0 |
+| py:function | `extract_balanced_block` | `tools/graplite_scan.py:585` | 0 |
+| py:function | `file_dependency_details` | `tools/graplite_scan.py:674` | 0 |
+| py:function | `top_level_summary` | `tools/graplite_scan.py:694` | 0 |
+| py:function | `nested_module_summary` | `tools/graplite_scan.py:705` | 0 |
+| py:function | `approx_symbol_scores` | `tools/graplite_scan.py:726` | 0 |
+| py:function | `detect_scip_readiness` | `tools/graplite_scan.py:741` | 0 |
+| py:function | `detect_scip_index_status` | `tools/graplite_scan.py:783` | 0 |
+| py:function | `extract_printable_strings` | `tools/graplite_scan.py:786` | 0 |
+| py:function | `normalize_symbol_hint` | `tools/graplite_scan.py:799` | 0 |
+| py:function | `read_varint` | `tools/graplite_scan.py:820` | 0 |
+| py:function | `read_length_delimited` | `tools/graplite_scan.py:832` | 0 |
+| py:function | `iter_fields` | `tools/graplite_scan.py:837` | 0 |
+| py:function | `decode_utf8` | `tools/graplite_scan.py:860` | 0 |
+| py:function | `parse_metadata` | `tools/graplite_scan.py:863` | 0 |
+| py:function | `normalize_structured_symbol` | `tools/graplite_scan.py:880` | 0 |
+| py:function | `parse_occurrence` | `tools/graplite_scan.py:945` | 0 |
+| py:function | `is_generic_structured_symbol` | `tools/graplite_scan.py:960` | 0 |
+| py:function | `parse_document` | `tools/graplite_scan.py:991` | 0 |
+| py:function | `file_path_aliases` | `tools/graplite_scan.py:1212` | 0 |
+| py:function | `group_scip_symbols_by_file` | `tools/graplite_scan.py:1221` | 0 |
+| py:function | `group_symbol_defs_by_file` | `tools/graplite_scan.py:1245` | 0 |
+| py:function | `nearest_symbol_defs_for_ranges` | `tools/graplite_scan.py:1257` | 0 |
+| py:function | `render_fast_map` | `tools/graplite_scan.py:1290` | 0 |
+| py:function | `render_blast_map` | `tools/graplite_scan.py:1525` | 0 |
+| py:function | `is_generic_route_symbol` | `tools/graplite_scan.py:1545` | 0 |
+| py:function | `extract_route_keywords` | `tools/graplite_scan.py:1558` | 0 |
+| py:function | `rank_route_symbols` | `tools/graplite_scan.py:1570` | 0 |
+| py:function | `route_priority_key` | `tools/graplite_scan.py:1878` | 0 |
+| py:function | `git_changed_files` | `tools/graplite_scan.py:2046` | 0 |
+| py:function | `parse_git_diff_ranges` | `tools/graplite_scan.py:2065` | 0 |
+| py:function | `extract_diff_symbol_candidates` | `tools/graplite_scan.py:2116` | 0 |
+| py:function | `git_changed_symbol_names` | `tools/graplite_scan.py:2138` | 0 |
+| py:function | `scan_repo` | `tools/graplite_scan.py:2185` | 0 |
+| py:function | `check_bin` | `tools/graplite_doctor.py:9` | 0 |
+| py:function | `safe_read` | `tools/render_drops_maps.py:16` | 0 |
+| py:function | `find_files` | `tools/render_drops_maps.py:46` | 0 |
+| py:function | `detect_stack` | `tools/render_drops_maps.py:61` | 0 |
+| py:function | `parse_pkg_json` | `tools/render_drops_maps.py:73` | 0 |
+| py:function | `collect_commands` | `tools/render_drops_maps.py:79` | 0 |
+| py:function | `heuristic_entrypoints` | `tools/render_drops_maps.py:91` | 0 |
 
 ## Notes
 - Output này tối ưu để AI đọc nhanh: entrypoints, env, route map, transfer hooks, hotspots, symbol index.

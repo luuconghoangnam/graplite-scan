@@ -100,6 +100,11 @@ DART_DEF_RES = [
     ("function", re.compile(r"^\s*(?:Future<[^>]+>|Future|void|int|double|String|bool|dynamic|Widget|\w+)\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(", re.M)),
 ]
 
+PY_DEF_RES = [
+    ("class", re.compile(r"^\s*class\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b", re.M)),
+    ("function", re.compile(r"^\s*(?:async\s+)?def\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(", re.M)),
+]
+
 ENV_USAGE_RE = re.compile(r"process\.env\.([A-Z0-9_]+)")
 ENV_KEY_LINE_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]+)\s*=.*$", re.M)
 FASTIFY_ROUTE_RE = re.compile(
@@ -303,6 +308,7 @@ def detect_scan_subdirs(repo: Path) -> List[str]:
         "packages",
         "apps",
         "services",
+        "tools",
         "ExtentionChrome/extension",
     ]
     return [c for c in candidates if (repo / c).exists()]
@@ -352,7 +358,7 @@ def build_import_graph(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]
         for p in base.rglob("*"):
             if is_ignored(p, ignore_dirs) or not p.is_file():
                 continue
-            if p.suffix not in {".ts", ".js", ".dart"}:
+            if p.suffix not in {".ts", ".js", ".dart", ".py"}:
                 continue
 
             rel = relpath_posix(p, repo)
@@ -379,6 +385,8 @@ def build_import_graph(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]
                         edges.setdefault(rel, set()).add(relpath_posix(rp, repo))
                     except Exception:
                         continue
+            elif p.suffix == ".py":
+                file_lang[rel] = "py"
     return edges, file_lang
 
 
@@ -396,6 +404,10 @@ def extract_symbols(repo: Path, files: Iterable[str], file_lang: Dict[str, str],
                     out.append(SymbolDef(lang=lang, kind=kind, name=m.group("name"), path=rel, line=txt[: m.start()].count("\n") + 1))
         elif lang == "dart":
             for kind, rx in DART_DEF_RES:
+                for m in rx.finditer(txt):
+                    out.append(SymbolDef(lang=lang, kind=kind, name=m.group("name"), path=rel, line=txt[: m.start()].count("\n") + 1))
+        elif lang == "py":
+            for kind, rx in PY_DEF_RES:
                 for m in rx.finditer(txt):
                     out.append(SymbolDef(lang=lang, kind=kind, name=m.group("name"), path=rel, line=txt[: m.start()].count("\n") + 1))
     return out
@@ -1232,6 +1244,51 @@ def group_scip_symbols_by_file(symbol_hints: List[str]) -> Dict[str, List[str]]:
     return cleaned
 
 
+def group_symbol_defs_by_file(symbols: List[SymbolDef]) -> Dict[str, List[SymbolDef]]:
+    grouped: Dict[str, List[SymbolDef]] = defaultdict(list)
+    for symbol in symbols:
+        for alias in file_path_aliases(symbol.path):
+            grouped[alias].append(symbol)
+
+    cleaned: Dict[str, List[SymbolDef]] = {}
+    for file_path, items in grouped.items():
+        cleaned[file_path] = sorted(items, key=lambda item: (item.line, item.name, item.kind))
+    return cleaned
+
+
+def nearest_symbol_defs_for_ranges(
+    file_path: str,
+    ranges: List[ChangedLineRange],
+    symbol_defs_by_file: Dict[str, List[SymbolDef]],
+) -> List[str]:
+    defs = symbol_defs_by_file.get(file_path, [])
+    if not defs or not ranges:
+        return []
+
+    ranked: List[Tuple[int, int, str]] = []
+    seen: Set[str] = set()
+    for item in ranges:
+        best: Optional[Tuple[int, SymbolDef]] = None
+        for symbol in defs:
+            if symbol.line <= item.end:
+                distance = max(0, item.start - symbol.line)
+            else:
+                distance = (symbol.line - item.end) + 100
+            if best is None or distance < best[0] or (distance == best[0] and symbol.line > best[1].line):
+                best = (distance, symbol)
+        if best is None:
+            continue
+        distance, symbol = best
+        label = f'{symbol.kind}:{symbol.name}@{symbol.line}'
+        if label in seen:
+            continue
+        seen.add(label)
+        ranked.append((distance, symbol.line, label))
+
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]))
+    return [label for _distance, _line, label in ranked[:8]]
+
+
 def render_fast_map(
     repo: Path,
     tree: List[str],
@@ -1477,6 +1534,7 @@ def render_blast_map(
     scip_readiness: ScipReadiness,
     scip_index_status: ScipIndexStatus,
     scip_symbols_by_file: Dict[str, List[str]],
+    symbol_defs_by_file: Dict[str, List[SymbolDef]],
     blast_name: str,
     diff_range: str = '',
     changed_files: Optional[List[str]] = None,
@@ -1885,14 +1943,17 @@ def render_blast_map(
             matched_routes: List[str] = []
             matched_route_scores: Dict[str, int] = defaultdict(int)
             changed_symbol_labels: List[str] = []
+            range_symbol_labels: List[str] = []
             heuristic_changed_names: List[str] = []
             seen_symbol_labels: Set[str] = set()
+            seen_range_symbol_labels: Set[str] = set()
             seen_changed_names: Set[str] = set()
             normalized_changed_files: List[str] = []
             seen_changed_aliases: Set[str] = set()
             for file_path in changed_files:
                 aliases = sorted(file_path_aliases(file_path))
                 raw_changed_names = (changed_symbol_names or {}).get(file_path, [])
+                raw_ranges = (changed_line_ranges or {}).get(file_path, [])
                 for name in raw_changed_names:
                     if name not in seen_changed_names:
                         seen_changed_names.add(name)
@@ -1903,6 +1964,11 @@ def render_blast_map(
                         normalized_changed_files.append(alias)
                     for route in file_to_routes.get(alias, []):
                         matched_route_scores[route] += 1
+                    for nearest_label in nearest_symbol_defs_for_ranges(alias, raw_ranges, symbol_defs_by_file):
+                        full_label = f'{alias} :: {nearest_label}'
+                        if full_label not in seen_range_symbol_labels:
+                            seen_range_symbol_labels.add(full_label)
+                            range_symbol_labels.append(full_label)
                     candidate_symbols = scip_symbols_by_file.get(alias, [])
                     prioritized_symbols = []
                     fallback_symbols = []
@@ -1916,6 +1982,8 @@ def render_blast_map(
                         if label not in seen_symbol_labels:
                             seen_symbol_labels.add(label)
                             changed_symbol_labels.append(label)
+            if range_symbol_labels:
+                lines.append(f"- Changed-range nearest symbols: {', '.join(f'`{x}`' for x in range_symbol_labels[:10])}")
             if heuristic_changed_names:
                 lines.append(f"- Heuristic changed symbols from diff: {', '.join(f'`{x}`' for x in heuristic_changed_names[:16])}")
             if normalized_changed_files and normalized_changed_files != changed_files:
@@ -2155,6 +2223,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
     scip_index_status = detect_scip_index_status(repo, scip_readiness)
     primary_scip_symbols = scip_index_status.structured_symbol_hints or scip_index_status.symbol_hints
     scip_symbols_by_file = group_scip_symbols_by_file(primary_scip_symbols)
+    symbol_defs_by_file = group_symbol_defs_by_file(symbols)
     top_summary = top_level_summary(repo, ignore_dirs)
     module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
     edge_details = file_dependency_details(edges, ranked_files)
@@ -2203,6 +2272,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
         scip_readiness=scip_readiness,
         scip_index_status=scip_index_status,
         scip_symbols_by_file=scip_symbols_by_file,
+        symbol_defs_by_file=symbol_defs_by_file,
         blast_name=blast_name,
         diff_range=diff_range,
         changed_files=changed_files,
