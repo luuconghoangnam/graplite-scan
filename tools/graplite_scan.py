@@ -3146,9 +3146,15 @@ def render_blast_map(
     def build_desktop_flow_map() -> List[Tuple[int, str, Optional[str], List[str], List[str], List[str], List[str]]]:
         rows: List[Tuple[int, str, Optional[str], List[str], List[str], List[str], List[str]]] = []
         seen_views: Set[str] = set()
+        candidate_pool = set(edges.keys()) | set(reverse_edges.keys())
+        if not candidate_pool:
+            for suffix in ('*.xaml', '*.xaml.cs', '*ViewModel.cs', '*Service.cs', '*Command.cs'):
+                for p in repo.rglob(suffix):
+                    rel = relpath_posix(p, repo)
+                    candidate_pool.add(rel)
         candidate_views = sorted(
-            path for path in set(edges.keys()) | set(reverse_edges.keys())
-            if path.lower().endswith(('.xaml', '.xaml.cs')) and any(part in path for part in ('Views/', 'Controls/', 'MainWindow.xaml', 'App.xaml'))
+            path for path in candidate_pool
+            if path.lower().endswith(('.xaml', '.xaml.cs')) and any(part in path for part in ('Views/', 'Controls/', 'MainWindow.xaml', 'App.xaml', 'Page.xaml', 'Shell.xaml', 'AppShell.xaml'))
         )
         for view_path in candidate_views:
             canonical_view = view_path[:-3] if view_path.endswith('.xaml.cs') else view_path
@@ -3586,7 +3592,23 @@ def render_blast_map(
             if app_symbols:
                 lines.append(f"- Structured symbols in file: {', '.join(f'`{item}`' for item in app_symbols[:6])}")
     else:
-        lines.append("- (No frontend/app-side feature flow map detected yet.)")
+        flutter_app_roots = []
+        for root_name in ('form_app', 'navigation_and_routing', 'compass_app', 'veggieseasons', 'material_3_demo', 'testing_app', 'desktop_photo_search'):
+            root = repo / root_name
+            if root.exists() and root.is_dir() and ((root / 'lib').exists() or (root / 'web').exists() or (root / 'android').exists()):
+                flutter_app_roots.append(root_name)
+        if flutter_app_roots:
+            for root_name in flutter_app_roots[:8]:
+                lines.append(f"### If changing `{root_name}/`")
+                lines.append("- Structural app-sample impact: app entrypoints, screens, routes, and shared widgets in this sample may shift together")
+                sample_bits: List[str] = []
+                for child_name in ('lib/', 'web/', 'android/', 'ios/', 'macos/', 'windows/'):
+                    if (repo / root_name / child_name.rstrip('/')).exists():
+                        sample_bits.append(f'`{root_name}/{child_name}`')
+                if sample_bits:
+                    lines.append(f"- Sample surfaces: {', '.join(sample_bits[:6])}")
+        else:
+            lines.append("- (No frontend/app-side feature flow map detected yet.)")
     lines.append("")
 
     lines.append("## Desktop view / viewmodel / command impact")
@@ -3610,7 +3632,22 @@ def render_blast_map(
             else:
                 lines.append("- Likely desktop flow impact: view wiring, commands, or injected services may shift")
     else:
-        lines.append("- (No desktop view/viewmodel/command flow detected yet.)")
+        fallback_views = []
+        for suffix in ('*.xaml', '*.xaml.cs'):
+            for p in repo.rglob(suffix):
+                rel = relpath_posix(p, repo)
+                lower = rel.lower()
+                if any(part in rel for part in ('Views/', 'Controls/', 'Page.xaml', 'Shell.xaml', 'AppShell.xaml', 'App.xaml')):
+                    fallback_views.append(rel)
+        if fallback_views:
+            for rel in sorted(dict.fromkeys(fallback_views))[:8]:
+                lines.append(f"### If changing `{rel}`")
+                lines.append("- Structural desktop impact: view wiring, bindings, commands, or shared desktop shell behavior may shift")
+                nearby_vm = rel.replace('Views/', 'ViewModels/').replace('.xaml.cs', 'ViewModel.cs').replace('.xaml', 'ViewModel.cs')
+                if (repo / nearby_vm).exists():
+                    lines.append(f"- Likely ViewModel link: `{nearby_vm}`")
+        else:
+            lines.append("- (No desktop view/viewmodel/command flow detected yet.)")
     lines.append("")
 
     lines.append("## Shared frontend component / state blast radius")
