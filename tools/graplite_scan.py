@@ -859,6 +859,20 @@ def nested_module_summary(
     ignore_paths: Sequence[str] = (),
 ) -> List[Tuple[str, str]]:
     out: List[Tuple[str, str]] = []
+    seen: Set[str] = set()
+
+    preferred_groups = {
+        'app', 'pages', 'routes', 'features', 'components', 'widgets', 'hooks',
+        'stores', 'state', 'composables', 'layouts', 'core', 'lib', 'modules',
+        'services', 'controllers', 'gateways', 'providers', 'api'
+    }
+
+    def add_group(rel: str, desc: str) -> None:
+        if rel in seen:
+            return
+        seen.add(rel)
+        out.append((rel, desc))
+
     for root in roots:
         base = repo / root
         if not base.exists() or not base.is_dir() or should_ignore_rel(root, ignore_paths):
@@ -874,7 +888,23 @@ def nested_module_summary(
                 continue
             rel = relpath_posix(p, repo) + '/'
             desc = DIR_RESP_HINTS.get(p.name.lower(), 'module / feature group')
-            out.append((rel, desc))
+            add_group(rel, desc)
+
+            lower_name = p.name.lower()
+            if lower_name not in preferred_groups:
+                continue
+            try:
+                child_items = sorted(p.iterdir(), key=lambda x: x.name.lower())
+            except Exception:
+                continue
+            for child in child_items[:40]:
+                if is_ignored(child, ignore_dirs, root=repo, ignore_paths=ignore_paths):
+                    continue
+                if not child.is_dir():
+                    continue
+                child_rel = relpath_posix(child, repo) + '/'
+                child_desc = DIR_RESP_HINTS.get(child.name.lower(), 'module / feature slice')
+                add_group(child_rel, child_desc)
     return out
 
 
