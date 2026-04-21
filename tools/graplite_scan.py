@@ -188,6 +188,12 @@ class RouteFlowHint:
 
 
 @dataclass
+class ChangedLineRange:
+    start: int
+    end: int
+
+
+@dataclass
 class ScipReadiness:
     enabled: bool
     repo_kind: str
@@ -1474,6 +1480,7 @@ def render_blast_map(
     blast_name: str,
     diff_range: str = '',
     changed_files: Optional[List[str]] = None,
+    changed_line_ranges: Optional[Dict[str, List[ChangedLineRange]]] = None,
     changed_symbol_names: Optional[Dict[str, List[str]]] = None,
     diff_error: str = '',
 ) -> List[str]:
@@ -1862,6 +1869,19 @@ def render_blast_map(
             lines.append(f"- Diff error: `{diff_error}`")
         elif changed_files:
             lines.append(f"- Changed files: {', '.join(f'`{x}`' for x in changed_files[:20])}")
+            if changed_line_ranges:
+                rendered_ranges: List[str] = []
+                for file_path in changed_files[:20]:
+                    ranges = (changed_line_ranges or {}).get(file_path, [])
+                    if not ranges:
+                        continue
+                    range_text = ', '.join(
+                        f'{item.start}' if item.start == item.end else f'{item.start}-{item.end}'
+                        for item in ranges[:6]
+                    )
+                    rendered_ranges.append(f'`{file_path}` → lines `{range_text}`')
+                if rendered_ranges:
+                    lines.append(f"- Changed line ranges: {'; '.join(rendered_ranges[:12])}")
             matched_routes: List[str] = []
             matched_route_scores: Dict[str, int] = defaultdict(int)
             changed_symbol_labels: List[str] = []
@@ -1976,6 +1996,57 @@ def git_changed_files(repo: Path, diff_range: str) -> Tuple[List[str], str]:
     return files, ''
 
 
+def parse_git_diff_ranges(repo: Path, diff_range: str) -> Tuple[Dict[str, List[ChangedLineRange]], str]:
+    if not diff_range:
+        return {}, ''
+    try:
+        proc = subprocess.run(
+            ['git', 'diff', '--unified=0', '--no-color', diff_range],
+            cwd=str(repo),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as err:
+        return {}, str(err)
+    if proc.returncode != 0:
+        return {}, (proc.stderr or proc.stdout or f'git diff exited {proc.returncode}').strip()
+
+    current_file = ''
+    grouped: Dict[str, List[ChangedLineRange]] = defaultdict(list)
+    hunk_re = re.compile(r'^@@ -(?P<old_start>\d+)(?:,(?P<old_len>\d+))? \+(?P<new_start>\d+)(?:,(?P<new_len>\d+))? @@')
+
+    for raw_line in proc.stdout.splitlines():
+        if raw_line.startswith('+++ b/'):
+            current_file = raw_line[6:].strip()
+            continue
+        if not current_file or not raw_line.startswith('@@'):
+            continue
+        match = hunk_re.match(raw_line)
+        if not match:
+            continue
+        new_start = int(match.group('new_start'))
+        new_len = int(match.group('new_len') or '1')
+        if match.group('new_len') == '0':
+            start = max(1, new_start)
+            end = start
+        else:
+            start = max(1, new_start)
+            end = max(start, new_start + max(new_len, 1) - 1)
+        grouped[current_file].append(ChangedLineRange(start=start, end=end))
+
+    cleaned: Dict[str, List[ChangedLineRange]] = {}
+    for file_path, ranges in grouped.items():
+        merged: List[ChangedLineRange] = []
+        for item in sorted(ranges, key=lambda r: (r.start, r.end)):
+            if not merged or item.start > merged[-1].end + 1:
+                merged.append(ChangedLineRange(start=item.start, end=item.end))
+            else:
+                merged[-1].end = max(merged[-1].end, item.end)
+        cleaned[file_path] = merged
+    return cleaned, ''
+
+
 def extract_diff_symbol_candidates(line: str) -> List[str]:
     lowered = line.strip().lower()
     if not lowered:
@@ -2088,7 +2159,10 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
     module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
     edge_details = file_dependency_details(edges, ranked_files)
     changed_files, diff_error = git_changed_files(repo, diff_range)
+    changed_line_ranges, diff_ranges_error = parse_git_diff_ranges(repo, diff_range)
     changed_symbol_names, diff_symbol_error = git_changed_symbol_names(repo, diff_range)
+    if diff_ranges_error and not diff_error:
+        diff_error = diff_ranges_error
     if diff_symbol_error and not diff_error:
         diff_error = diff_symbol_error
 
@@ -2132,6 +2206,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
         blast_name=blast_name,
         diff_range=diff_range,
         changed_files=changed_files,
+        changed_line_ranges=changed_line_ranges,
         changed_symbol_names=changed_symbol_names,
         diff_error=diff_error,
     )

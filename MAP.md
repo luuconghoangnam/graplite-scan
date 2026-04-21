@@ -28,6 +28,162 @@ docs/
   TODO_NEXT.md
 output/
 references/
+  code-review-graph/
+    .github/
+      workflows/
+    .serena/
+      .gitignore
+      project.yml
+    code-review-graph-vscode/
+      media/
+      src/
+      test/
+      .gitignore
+      .vscodeignore
+      CHANGELOG.md
+      esbuild.mjs
+      LICENSE
+      package-lock.json
+      package.json
+      README.md
+      tsconfig.json
+    code_review_graph/
+      eval/
+      tools/
+      __init__.py
+      __main__.py
+      analysis 2.py
+      analysis.py
+      changes.py
+      cli.py
+      communities.py
+      constants.py
+      embeddings.py
+      enrich 2.py
+      enrich 3.py
+      enrich.py
+      exports 2.py
+      exports 3.py
+      exports.py
+      flows.py
+      graph.py
+      graph_diff 2.py
+      graph_diff.py
+      hints.py
+      incremental.py
+      jedi_resolver 2.py
+      jedi_resolver.py
+      main.py
+      memory 2.py
+      memory 3.py
+      memory.py
+      migrations.py
+      parser.py
+      postprocessing.py
+      prompts.py
+      refactor.py
+      registry.py
+      rescript_resolver.py
+      search.py
+      skills.py
+      token_benchmark 2.py
+      token_benchmark.py
+      tsconfig_resolver.py
+      visualization.py
+      wiki.py
+    diagrams/
+      diagram1_before_vs_after.png
+      diagram2_architecture_pipeline.png
+      diagram3_blast_radius.png
+      diagram4_incremental_update.png
+      diagram5_benchmark_board.png
+      diagram6_monorepo_funnel.png
+      diagram7_mcp_integration_flow.png
+      diagram8_supported_platforms.png
+      diagram9_language_coverage.png
+      generate_diagrams.py
+    docs/
+      architecture.md
+      COMMANDS.md
+      FEATURES.md
+      INDEX.md
+      LEGAL.md
+      LLM-OPTIMIZED-REFERENCE.md
+      ROADMAP.md
+      schema.md
+      TROUBLESHOOTING.md
+      USAGE.md
+    hooks/
+      hooks.json
+      session-start.sh
+    skills/
+      build-graph/
+      debug-issue/
+      explore-codebase/
+      refactor-safely/
+      review-changes/
+      review-delta/
+      review-pr/
+    tests/
+      fixtures/
+      __init__.py
+      test_changes.py
+      test_cli 2.py
+      test_cli.py
+      test_communities.py
+      test_embeddings.py
+      test_enrich 2.py
+      test_enrich.py
+      test_eval.py
+      test_flows.py
+      test_fts_sync.py
+      test_graph.py
+      test_hints.py
+      test_incremental.py
+      test_integration_git.py
+      test_integration_v2.py
+      test_main 2.py
+      test_main.py
+      test_migrations.py
+      test_multilang.py
+      test_notebook.py
+      test_parser.py
+      test_postprocessing 2.py
+      test_postprocessing.py
+      test_prompts.py
+      test_refactor.py
+      test_registry.py
+      test_search.py
+      test_skills.py
+      test_tools.py
+      test_transactions.py
+      test_tsconfig_resolver.py
+      test_visualization.py
+      test_wiki.py
+    .coverage 2
+    .coverage 3
+    .gitignore
+    .mcp.json
+    AGENTS 2.md
+    AGENTS.md
+    CHANGELOG.md
+    CLAUDE.md
+    CODE_OF_CONDUCT.md
+    CONTRIBUTING.md
+    GEMINI 2.md
+    GEMINI.md
+    LICENSE
+    pyproject.toml
+    README.hi-IN.md
+    README.ja-JP 2.md
+    README.ja-JP 3.md
+    README.ja-JP.md
+    README.ko-KR.md
+    README.md
+    README.zh-CN 2.md
+    README.zh-CN.md
+    SECURITY.md
+    uv.lock
   scip/
     .github/
       ISSUE_TEMPLATE/
@@ -211,6 +367,10 @@ README.md
 ## Key manifests (depth<=4)
 ```
 README.md
+references/code-review-graph/README.md
+references/code-review-graph/code-review-graph-vscode/README.md
+references/code-review-graph/code-review-graph-vscode/package.json
+references/code-review-graph/pyproject.toml
 references/scip-typescript/Dockerfile
 references/scip-typescript/README.md
 references/scip-typescript/package.json
