@@ -109,6 +109,19 @@ FASTIFY_ROUTE_RE = re.compile(
 REGISTER_ROUTE_RE = re.compile(r"\b(register[A-Za-z0-9_]*(?:Routes|Gateway))\s*\(")
 WS_EVENT_RE = re.compile(r"['\"]([A-Za-z0-9:_\-]+)['\"]")
 TRANSFER_HINT_RE = re.compile(r"transfer|gateway|websocket|socket|peer", re.I)
+DIFF_SYMBOL_RES = [
+    re.compile(r"\bclass\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
+    re.compile(r"\binterface\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
+    re.compile(r"\benum\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
+    re.compile(r"\btype\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
+    re.compile(r"\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
+    re.compile(r"\bconst\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
+    re.compile(r"\bfinal\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
+    re.compile(r"\bvar\s+([A-Za-z_][A-Za-z0-9_]*)\b"),
+    re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:async\s*)?\([^)]*\)\s*=>"),
+    re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"),
+    re.compile(r"^\s*(?:public\s+|private\s+|protected\s+|static\s+|async\s+|override\s+|readonly\s+|abstract\s+|get\s+|set\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+]
 DIR_RESP_HINTS = {
     'backend': 'server/backend logic',
     'server': 'server/backend logic',
@@ -1461,6 +1474,7 @@ def render_blast_map(
     blast_name: str,
     diff_range: str = '',
     changed_files: Optional[List[str]] = None,
+    changed_symbol_names: Optional[Dict[str, List[str]]] = None,
     diff_error: str = '',
 ) -> List[str]:
     def is_generic_route_symbol(symbol: str) -> bool:
@@ -1788,18 +1802,36 @@ def render_blast_map(
     prioritized_route_flow_hints = route_flow_hints[:]
     if changed_files:
         changed_aliases: Set[str] = set()
+        changed_name_aliases: Dict[str, List[str]] = defaultdict(list)
         for file_path in changed_files:
-            changed_aliases.update(file_path_aliases(file_path))
+            aliases = file_path_aliases(file_path)
+            changed_aliases.update(aliases)
+            for alias in aliases:
+                for name in (changed_symbol_names or {}).get(file_path, []):
+                    if name not in changed_name_aliases[alias]:
+                        changed_name_aliases[alias].append(name)
 
-        def route_priority_key(hint: RouteFlowHint) -> Tuple[int, str, str]:
+        def route_priority_key(hint: RouteFlowHint) -> Tuple[int, int, str, str]:
             route_label = f"{hint.method} {hint.path}"
             touched = 0
+            symbol_hits = 0
+            impacted_files: List[str] = []
             for step in hint.chain:
                 for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
                     file_path = file_match.split(':', 1)[0]
+                    if file_path not in impacted_files:
+                        impacted_files.append(file_path)
                     if file_path in changed_aliases:
                         touched += 1
-            return (-touched, hint.method, route_label)
+            for impacted_file in impacted_files:
+                candidate_names = changed_name_aliases.get(impacted_file, [])
+                if not candidate_names:
+                    continue
+                for symbol in scip_symbols_by_file.get(impacted_file, []):
+                    lower_symbol = symbol.lower()
+                    if any(name.lower() in lower_symbol for name in candidate_names):
+                        symbol_hits += 1
+            return (-symbol_hits, -touched, hint.method, route_label)
 
         prioritized_route_flow_hints = sorted(route_flow_hints, key=route_priority_key)
 
@@ -1833,22 +1865,39 @@ def render_blast_map(
             matched_routes: List[str] = []
             matched_route_scores: Dict[str, int] = defaultdict(int)
             changed_symbol_labels: List[str] = []
+            heuristic_changed_names: List[str] = []
             seen_symbol_labels: Set[str] = set()
+            seen_changed_names: Set[str] = set()
             normalized_changed_files: List[str] = []
             seen_changed_aliases: Set[str] = set()
             for file_path in changed_files:
                 aliases = sorted(file_path_aliases(file_path))
+                raw_changed_names = (changed_symbol_names or {}).get(file_path, [])
+                for name in raw_changed_names:
+                    if name not in seen_changed_names:
+                        seen_changed_names.add(name)
+                        heuristic_changed_names.append(name)
                 for alias in aliases:
                     if alias not in seen_changed_aliases:
                         seen_changed_aliases.add(alias)
                         normalized_changed_files.append(alias)
                     for route in file_to_routes.get(alias, []):
                         matched_route_scores[route] += 1
-                    for symbol in scip_symbols_by_file.get(alias, []):
+                    candidate_symbols = scip_symbols_by_file.get(alias, [])
+                    prioritized_symbols = []
+                    fallback_symbols = []
+                    for symbol in candidate_symbols:
+                        if raw_changed_names and any(name.lower() in symbol.lower() for name in raw_changed_names):
+                            prioritized_symbols.append(symbol)
+                        else:
+                            fallback_symbols.append(symbol)
+                    for symbol in prioritized_symbols + fallback_symbols:
                         label = f'{alias} :: {symbol}'
                         if label not in seen_symbol_labels:
                             seen_symbol_labels.add(label)
                             changed_symbol_labels.append(label)
+            if heuristic_changed_names:
+                lines.append(f"- Heuristic changed symbols from diff: {', '.join(f'`{x}`' for x in heuristic_changed_names[:16])}")
             if normalized_changed_files and normalized_changed_files != changed_files:
                 lines.append(f"- Normalized file aliases: {', '.join(f'`{x}`' for x in normalized_changed_files[:20])}")
             for route, _score in sorted(matched_route_scores.items(), key=lambda kv: (-kv[1], kv[0])):
@@ -1927,6 +1976,75 @@ def git_changed_files(repo: Path, diff_range: str) -> Tuple[List[str], str]:
     return files, ''
 
 
+def extract_diff_symbol_candidates(line: str) -> List[str]:
+    lowered = line.strip().lower()
+    if not lowered:
+        return []
+    if lowered in {'{', '}', '(', ')', '[', ']'}:
+        return []
+    blocked = {'if', 'for', 'while', 'switch', 'catch', 'return', 'throw', 'else', 'case'}
+    found: List[str] = []
+    seen: Set[str] = set()
+    for rx in DIFF_SYMBOL_RES:
+        for match in rx.finditer(line):
+            name = match.group(1).strip()
+            if not name or name.lower() in blocked:
+                continue
+            if len(name) <= 1:
+                continue
+            if name not in seen:
+                seen.add(name)
+                found.append(name)
+    return found
+
+
+def git_changed_symbol_names(repo: Path, diff_range: str) -> Tuple[Dict[str, List[str]], str]:
+    if not diff_range:
+        return {}, ''
+    try:
+        proc = subprocess.run(
+            ['git', 'diff', '--unified=0', '--no-color', diff_range],
+            cwd=str(repo),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as err:
+        return {}, str(err)
+    if proc.returncode != 0:
+        return {}, (proc.stderr or proc.stdout or f'git diff exited {proc.returncode}').strip()
+
+    current_file = ''
+    grouped: Dict[str, List[str]] = defaultdict(list)
+    for raw_line in proc.stdout.splitlines():
+        if raw_line.startswith('+++ b/'):
+            current_file = raw_line[6:].strip()
+            continue
+        if raw_line.startswith('@@'):
+            context = raw_line.split('@@', 2)[-1].strip()
+            if current_file and context:
+                grouped[current_file].extend(extract_diff_symbol_candidates(context))
+            continue
+        if not current_file:
+            continue
+        if raw_line.startswith('+++') or raw_line.startswith('---'):
+            continue
+        if raw_line.startswith('+') or raw_line.startswith('-'):
+            grouped[current_file].extend(extract_diff_symbol_candidates(raw_line[1:]))
+
+    cleaned: Dict[str, List[str]] = {}
+    for file_path, names in grouped.items():
+        seen: Set[str] = set()
+        kept: List[str] = []
+        for name in names:
+            if name in seen:
+                continue
+            seen.add(name)
+            kept.append(name)
+        cleaned[file_path] = kept[:20]
+    return cleaned, ''
+
+
 def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_range: str = '') -> Tuple[Path, Path]:
     ignore_dirs = set(DEFAULT_IGNORE_DIRS)
     scan_subdirs = detect_scan_subdirs(repo)
@@ -1970,6 +2088,9 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
     module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
     edge_details = file_dependency_details(edges, ranked_files)
     changed_files, diff_error = git_changed_files(repo, diff_range)
+    changed_symbol_names, diff_symbol_error = git_changed_symbol_names(repo, diff_range)
+    if diff_symbol_error and not diff_error:
+        diff_error = diff_symbol_error
 
     fast_lines = render_fast_map(
         repo=repo,
@@ -2011,6 +2132,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
         blast_name=blast_name,
         diff_range=diff_range,
         changed_files=changed_files,
+        changed_symbol_names=changed_symbol_names,
         diff_error=diff_error,
     )
 

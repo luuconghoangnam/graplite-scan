@@ -203,6 +203,8 @@ tools/
   render_drops_maps.py
   scan_repo.sh
 .gitignore
+IMPACT.md
+MAP.md
 README.md
 ```
 
