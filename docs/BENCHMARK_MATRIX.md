@@ -407,7 +407,9 @@ Anti-noise checks:
 - Result after third fix: `IMPACT.md` now links pages like `AsyncRelayCommandPage.xaml`, `RelayCommandPage.xaml`, and `IoCPage.xaml` to concrete `MvvmSample.Core/ViewModels/*` files instead of leaving desktop flow mostly shell-only.
 - Fourth fix applied: fallback desktop matching now keeps `ViewModel`, `service`, and `command` buckets separated instead of echoing the same file into all categories.
 - Result after fourth fix: desktop output is narrower and less noisy; rows now primarily show concrete `ViewModel` links where that is the strongest evidence.
-- Remaining gap: add explicit service/command extraction from matched `ViewModel` code so those buckets can repopulate with stronger evidence instead of staying mostly empty.
+- Fifth fix applied: matched `ViewModel` text is now mined for service-type names and command-framework hints, then folded back into desktop fallback service/command buckets.
+- Result after fifth fix: service buckets now surface more believable files such as `IFileService.cs`, `IRedditService.cs`, and platform `FileService.cs` instead of staying mostly empty.
+- Remaining gap: command buckets still lean too much on name/path heuristics and need stronger evidence to avoid pulling unrelated command-adjacent pages.
 
 ### `flutter-samples`
 - First miss observed: scanner inventories the repo correctly, but architecture summary is too timid for a sample corpus and does not distinguish app-shaped Flutter subprojects from repo-level sample collection shape.

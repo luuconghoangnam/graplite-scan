@@ -3353,21 +3353,29 @@ def render_blast_map(
             ctor_args = [m.group('name') for m in CS_CTOR_ARG_TYPE_RE.finditer(codebehind_txt)]
             has_initialize_component = bool(CS_INITIALIZE_COMPONENT_RE.search(codebehind_txt))
 
-            if vm_links and command_names:
+            if vm_links:
+                service_type_names: List[str] = []
+                vm_command_kinds: List[str] = []
                 for vm_file in list(vm_links):
                     vm_txt = safe_read_text(repo / vm_file)
-                    if any(re.search(r'\b' + re.escape(name) + r'\b', vm_txt) for name in command_names):
+                    if command_names and any(re.search(r'\b' + re.escape(name) + r'\b', vm_txt) for name in command_names):
                         append_matches(command_links, command_names, ('/commands/', 'command'), 'command')
-                        for dep in edges.get(vm_file, set()):
-                            lower_dep = dep.lower()
-                            if ('/services/' in dep or dep.endswith('Service.cs')) and dep not in service_links:
-                                service_links.append(dep)
-                            if ('/commands/' in dep or dep.endswith('Command.cs')) and dep not in command_links:
-                                command_links.append(dep)
                     if any(re.search(r'\b' + re.escape(name) + r'\b', vm_txt) for name in interface_command_props):
-                        for dep in edges.get(vm_file, set()):
-                            if ('/commands/' in dep or dep.endswith('Command.cs')) and dep not in command_links:
-                                command_links.append(dep)
+                        append_matches(command_links, interface_command_props, ('/commands/', 'command'), 'command')
+                    service_type_names.extend(m.group('name') for m in re.finditer(r'\bI?(?P<name>[A-Z][A-Za-z0-9]*Service)\b', vm_txt))
+                    for kind in ('RelayCommand', 'AsyncRelayCommand', 'DelegateCommand', 'ReactiveCommand', 'ICommand'):
+                        if re.search(r'\b' + re.escape(kind) + r'\b', vm_txt):
+                            vm_command_kinds.append(kind)
+                    for dep in edges.get(vm_file, set()):
+                        lower_dep = dep.lower()
+                        if ('/services/' in dep or dep.endswith('Service.cs')) and dep not in service_links:
+                            service_links.append(dep)
+                        if ('/commands/' in dep or dep.endswith('Command.cs')) and dep not in command_links:
+                            command_links.append(dep)
+                if service_type_names:
+                    append_matches(service_links, service_type_names, ('/services/', 'service'), 'service')
+                if vm_command_kinds:
+                    append_matches(command_links, vm_command_kinds, ('/commands/', 'command'), 'command')
 
             append_matches(command_links, assigned_command_kinds, ('/commands/', 'command'), 'command')
             score = len(vm_links) * 3 + len(service_links) * 2 + len(command_links) * 2 + len(control_links) + len(consumers)
