@@ -144,9 +144,12 @@ DIR_RESP_HINTS = {
     'lib': 'shared/library source',
     'pages': 'route/page modules',
     'components': 'UI components',
+    'widgets': 'UI components',
     'hooks': 'client hooks/state wiring',
     'stores': 'state/store modules',
+    'state': 'state/store modules',
     'composables': 'vue composables',
+    'layouts': 'layout / shell modules',
     'api': 'API handlers or service endpoints',
     'routes': 'router or endpoint definitions',
     'docs': 'architecture notes, plans, docs',
@@ -939,10 +942,41 @@ def architecture_summary_lines(
     frontend_prefixes = (
         'app/lib/features/', 'app/lib/core/', 'src/app/', 'src/pages/', 'src/components/',
         'src/features/', 'src/routes/', 'src/hooks/', 'src/stores/', 'src/composables/',
-        'frontend/src/', 'client/src/', 'web/src/', 'pages/', 'components/', 'routes/'
+        'src/state/', 'src/layouts/', 'frontend/src/', 'client/src/', 'web/src/',
+        'pages/', 'components/', 'routes/'
     )
-    app_groups = [name.split('/')[-1] for name in module_names if name.startswith(frontend_prefixes)]
+    app_groups = [name for name in module_names if name.startswith(frontend_prefixes)]
     backend_groups = [name.split('/')[-1] for name in module_names if name.startswith(('backend/src/modules/', 'server/', 'services/', 'api/'))]
+
+    def frontend_group_label(path: str) -> Optional[str]:
+        normalized = path.rstrip('/')
+        base = normalized.split('/')[-1].lower()
+        if base in {'app', 'pages', 'routes'}:
+            return 'route surface'
+        if base in {'features'}:
+            return 'feature screens'
+        if base in {'components', 'widgets'}:
+            return 'UI components'
+        if base in {'hooks', 'stores', 'state', 'composables'}:
+            return 'state / client logic'
+        if base in {'core', 'lib', 'layouts'}:
+            return 'shared app shell/core'
+        parts = normalized.split('/')
+        if any(part in {'pages', 'routes', 'app'} for part in parts):
+            return 'route surface'
+        if any(part in {'components', 'widgets'} for part in parts):
+            return 'UI components'
+        if any(part in {'hooks', 'stores', 'state', 'composables'} for part in parts):
+            return 'state / client logic'
+        return None
+
+    frontend_labels: List[str] = []
+    seen_frontend_labels: Set[str] = set()
+    for name in app_groups:
+        label = frontend_group_label(name)
+        if label and label not in seen_frontend_labels:
+            seen_frontend_labels.add(label)
+            frontend_labels.append(label)
 
     if backend_entry or flutter_entry:
         runtime_parts: List[str] = []
@@ -955,8 +989,11 @@ def architecture_summary_lines(
     subsystem_bits: List[str] = []
     frontend_roots = {'app', 'frontend', 'client', 'web'}
     if top_names & frontend_roots or flutter_entry:
-        if app_groups:
-            subsystem_bits.append(f"frontend groups: {', '.join(f'`{name}`' for name in app_groups[:8])}")
+        if frontend_labels:
+            subsystem_bits.append(f"frontend shape: {', '.join(f'`{name}`' for name in frontend_labels[:5])}")
+        elif app_groups:
+            raw_groups = [name.split('/')[-1] for name in app_groups[:6]]
+            subsystem_bits.append(f"frontend groups: {', '.join(f'`{name}`' for name in raw_groups)}")
         else:
             subsystem_bits.append("frontend/app layer present")
     if 'backend' in top_names or 'server' in top_names or backend_entry:
@@ -969,9 +1006,9 @@ def architecture_summary_lines(
     if subsystem_bits:
         lines.append(f"- Main subsystems: {'; '.join(subsystem_bits)}")
 
-    meaningful_shared = [name for name in app_groups if name in {'core', 'components', 'hooks', 'stores', 'composables'}]
+    meaningful_shared = [label for label in frontend_labels if label in {'UI components', 'state / client logic', 'shared app shell/core'}]
     if meaningful_shared:
-        lines.append(f"- Shared frontend groups: {', '.join(f'`{name}`' for name in meaningful_shared[:8])}")
+        lines.append(f"- Shared frontend building blocks: {', '.join(f'`{name}`' for name in meaningful_shared[:3])}")
 
     if route_flow_hints:
         unique_routes: List[str] = []
@@ -2378,7 +2415,7 @@ def render_fast_map(
     if backend_entry:
         lines.append(f"- Backend: `{backend_entry}`")
     if flutter_entry:
-        lines.append(f"- Flutter: `{flutter_entry}`")
+        lines.append(f"- App/frontend: `{flutter_entry}`")
     ext_bg = repo / "ExtentionChrome/extension/background.js"
     if ext_bg.exists():
         lines.append("- Chrome extension: `ExtentionChrome/extension/background.js` (+ content/offscreen)")
