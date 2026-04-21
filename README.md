@@ -9,6 +9,7 @@ Local/offline repo scanner that generates two **in-repo** Markdown files optimiz
 - clean output for AI to read
 - enough structure/detail for onboarding + impact analysis
 - easy to clone onto another machine and set up quickly
+- can be used in npm-style CLI flows
 
 ---
 
@@ -33,6 +34,34 @@ You can also run:
 graplite
 graplite .
 graplite /path/to/repo
+```
+
+---
+
+## npm-style usage
+
+### Local npx form (works now)
+From inside the `graplite-scan` repo:
+
+```bash
+npx . /path/to/repo
+```
+
+### Local package-name form (works after link)
+
+```bash
+cd graplite-scan
+npm link
+cd /path/to/repo
+npx graplite-scan .
+```
+
+### Future fully-global form
+After publishing the package, the goal is:
+
+```bash
+cd /path/to/repo
+npx graplite-scan
 ```
 
 ---
