@@ -45,6 +45,7 @@ Why:
 - no external service dependency
 - no premature MCP/platform sprawl
 - outputs must stay understandable by both humans and AI
+- keep generated output budget tight: prefer 2 files, max 3 files
 
 ## Done means
 

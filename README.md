@@ -11,6 +11,7 @@ Local/offline repo scanner that generates in-repo outputs optimized for AI + hum
 - enough structure/detail for onboarding + impact analysis
 - easy to clone onto another machine and set up quickly
 - can be used in npm-style CLI flows
+- keep output budget tight: prefer 2 files, max 3 files
 
 ---
 
@@ -214,9 +215,9 @@ Minimal portable setup:
 Helpful ignore block:
 - small graplite section in `.gitignore`
 
-Optional checked-in outputs:
-- `MAP.md`
-- `IMPACT.md`
+Optional checked-in outputs (tight budget):
+- preferred core: `MAP.md` + `IMPACT.md`
+- optional third file only when it adds clear value: `ARCHITECTURE.mmd`
 
 ---
 

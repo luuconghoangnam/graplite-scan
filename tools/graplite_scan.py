@@ -939,6 +939,21 @@ def render_architecture_mermaid(
     added_nodes: Set[str] = set()
     added_edges: Set[Tuple[str, str, str]] = set()
 
+    def shorten_label(value: str, max_len: int = 42) -> str:
+        if len(value) <= max_len:
+            return value
+        head = max_len - 3
+        return value[:head] + '...'
+
+    def pretty_module_label(path: str) -> str:
+        if path.startswith('backend/src/modules/'):
+            return 'backend/' + path.split('/')[-1]
+        if path.startswith('app/lib/features/'):
+            return 'feature/' + path.split('/')[-1]
+        if path.startswith('app/lib/core/'):
+            return 'core/' + path.split('/')[-1]
+        return path.split('/')[-1]
+
     def add_node(node_id: str, label: str) -> None:
         if node_id in added_nodes:
             return
@@ -955,7 +970,7 @@ def render_architecture_mermaid(
         else:
             lines.append(f'    {src} --> {dst}')
 
-    top_names = [name.rstrip('/') for name, _desc in filter_top_summary_items(top_summary)[:10]]
+    top_names = [name.rstrip('/') for name, _desc in filter_top_summary_items(top_summary)[:6]]
     top_ids: Dict[str, str] = {}
     for name in top_names:
         node_id = f'top_{mermaid_safe_id(name)}'
@@ -964,59 +979,82 @@ def render_architecture_mermaid(
         add_edge('repo', node_id)
 
     if backend_entry:
-        add_node('backend_entry', backend_entry)
-        add_edge('repo', 'backend_entry', 'entry')
+        add_node('backend_entry', shorten_label(backend_entry))
         if 'backend' in top_ids:
-            add_edge(top_ids['backend'], 'backend_entry', 'runtime')
+            add_edge(top_ids['backend'], 'backend_entry', 'entry')
+        else:
+            add_edge('repo', 'backend_entry', 'entry')
 
     if flutter_entry:
-        add_node('app_entry', flutter_entry)
-        add_edge('repo', 'app_entry', 'entry')
+        add_node('app_entry', shorten_label(flutter_entry))
         if 'app' in top_ids:
-            add_edge(top_ids['app'], 'app_entry', 'runtime')
+            add_edge(top_ids['app'], 'app_entry', 'entry')
+        else:
+            add_edge('repo', 'app_entry', 'entry')
 
     selected_modules: List[str] = []
-    for prefix, limit in (('backend/src/modules/', 4), ('app/lib/features/', 5), ('app/lib/core/', 4)):
+    for prefix, limit in (('backend/src/modules/', 3), ('app/lib/features/', 4), ('app/lib/core/', 2)):
         picked = [name.rstrip('/') for name, _desc in module_summary if name.startswith(prefix)][:limit]
         selected_modules.extend(picked)
 
     for name in selected_modules:
         node_id = f'mod_{mermaid_safe_id(name)}'
-        add_node(node_id, name)
-        add_edge('repo', node_id, 'group')
+        add_node(node_id, pretty_module_label(name))
         if name.startswith('backend/') and 'backend' in top_ids:
-            add_edge(top_ids['backend'], node_id)
+            add_edge(top_ids['backend'], node_id, 'group')
         elif name.startswith('app/') and 'app' in top_ids:
-            add_edge(top_ids['app'], node_id)
+            add_edge(top_ids['app'], node_id, 'group')
+        else:
+            add_edge('repo', node_id, 'group')
 
-    for hint in route_flow_hints[:6]:
+    seen_route_paths: Set[str] = set()
+    for hint in route_flow_hints:
+        route_key = f'{hint.method} {hint.path}'
+        if route_key in seen_route_paths:
+            continue
+        seen_route_paths.add(route_key)
         route_id = f'route_{mermaid_safe_id(hint.method + '_' + hint.path)}'
-        add_node(route_id, f'{hint.method} {hint.path}')
+        add_node(route_id, route_key)
         if 'backend' in top_ids:
             add_edge(top_ids['backend'], route_id, 'route')
         elif backend_entry:
             add_edge('backend_entry', route_id, 'route')
+
         chain_files: List[str] = []
         seen_files: Set[str] = set()
         for step in hint.chain:
             for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
                 file_path = file_match.split(':', 1)[0]
-                if file_path not in seen_files:
-                    seen_files.add(file_path)
-                    chain_files.append(file_path)
+                if file_path in seen_files:
+                    continue
+                lower = file_path.lower()
+                if not any(token in lower for token in ('controller', 'service', 'gateway', 'provider', 'adapter', 'discovery')):
+                    continue
+                seen_files.add(file_path)
+                chain_files.append(file_path)
         prev = route_id
-        for file_path in chain_files[:4]:
+        for file_path in chain_files[:2]:
             file_id = f'flow_{mermaid_safe_id(file_path)}'
-            add_node(file_id, file_path)
-            add_edge(prev, file_id, 'flows to')
+            add_node(file_id, shorten_label(file_path.split('/')[-1]))
+            add_edge(prev, file_id, 'flow')
             prev = file_id
+        if len(seen_route_paths) >= 4:
+            break
 
-    gateway_items = sorted(gateway_hints.items())[:6]
+    gateway_items = sorted(gateway_hints.items())
+    picked_gateways = []
     for file_path, hints in gateway_items:
-        gw_id = f'gw_{mermaid_safe_id(file_path)}'
-        add_node(gw_id, file_path)
         lower = file_path.lower()
-        if lower.startswith('backend/') or any(token in lower for token in ('transfer.gateway', 'peer.gateway', 'controller.ts', 'service.ts', 'provider.ts')):
+        if any(token in lower for token in ('transfer.gateway', 'peer.gateway', 'cloud_adapter', 'lan_discovery')):
+            picked_gateways.append((file_path, hints))
+        if len(picked_gateways) >= 4:
+            break
+
+    for file_path, hints in picked_gateways:
+        gw_id = f'gw_{mermaid_safe_id(file_path)}'
+        add_node(gw_id, shorten_label(file_path.split('/')[-1]))
+        lower = file_path.lower()
+        if lower.startswith('backend/'):
             if 'backend' in top_ids:
                 add_edge(top_ids['backend'], gw_id, 'signal')
             elif backend_entry:
@@ -1026,11 +1064,18 @@ def render_architecture_mermaid(
                 add_edge(top_ids['app'], gw_id, 'link')
             elif flutter_entry:
                 add_edge('app_entry', gw_id, 'link')
-        for hint in hints[:2]:
+        meaningful_hints = []
+        for hint in hints:
+            hint_lower = hint.lower()
             if hint.startswith('dart:') or hint.startswith('package:'):
                 continue
+            if any(token in hint_lower for token in ('content-type', 'content-disposition', 'x-drops-file-size')):
+                continue
+            meaningful_hints.append(hint)
+        if meaningful_hints:
+            hint = meaningful_hints[0]
             hint_id = f'hint_{mermaid_safe_id(file_path + hint)}'
-            add_node(hint_id, hint[:60])
+            add_node(hint_id, shorten_label(hint, 28))
             add_edge(gw_id, hint_id, 'hint')
 
     return lines

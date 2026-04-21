@@ -58,3 +58,15 @@ When improving output quality for real repos, prefer these before adding heavier
 Repo-local noise control now lives in `.graplite.json` via:
 - `ignoreDirs`
 - `ignorePaths`
+
+## Output budget rule
+
+Prefer shipping value inside:
+- `MAP.md`
+- `IMPACT.md`
+
+Allow a third file only when it clearly earns its place:
+- `ARCHITECTURE.mmd`
+
+Do not casually add new generated output files beyond this budget.
+Improve quality inside the existing 2-3 file surface first.
