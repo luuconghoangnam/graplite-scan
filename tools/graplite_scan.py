@@ -102,6 +102,26 @@ XAML_CODEBEHIND_RE = re.compile(
     r'x:Class\s*=\s*["\'](?P<klass>[^"\']+)["\']',
     re.I,
 )
+XAML_COMMAND_RE = re.compile(
+    r'\b(?:Command|CommandParameter)\s*=\s*["\']\{Binding\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)',
+    re.I,
+)
+XAML_CLICK_RE = re.compile(
+    r'\bClick\s*=\s*["\'](?P<name>[A-Za-z_][A-Za-z0-9_]*)["\']',
+    re.I,
+)
+XAML_DATACONTEXT_RE = re.compile(
+    r'\bDataContext\s*=\s*["\']\{Binding\s+(?P<name>[A-Za-z_][A-Za-z0-9_\.]*)',
+    re.I,
+)
+CS_NEW_RE = re.compile(
+    r'\bnew\s+(?P<name>[A-Z][A-Za-z0-9_]*)\s*\(',
+    re.M,
+)
+CS_COMMAND_PROP_RE = re.compile(
+    r'\b(?P<name>[A-Za-z_][A-Za-z0-9_]*Command)\b',
+    re.M,
+)
 
 TS_DEF_RES = [
     ("class", re.compile(r"^\s*(?:export\s+)?class\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b", re.M)),
@@ -2901,6 +2921,66 @@ def render_blast_map(
         candidates.sort(key=lambda item: (-item[0], item[1]))
         return candidates[:10]
 
+    def build_desktop_flow_map() -> List[Tuple[int, str, Optional[str], List[str], List[str], List[str], List[str]]]:
+        rows: List[Tuple[int, str, Optional[str], List[str], List[str], List[str], List[str]]] = []
+        seen_views: Set[str] = set()
+        candidate_views = sorted(
+            path for path in set(edges.keys()) | set(reverse_edges.keys())
+            if path.lower().endswith(('.xaml', '.xaml.cs')) and any(part in path for part in ('Views/', 'Controls/', 'MainWindow.xaml', 'App.xaml'))
+        )
+        for view_path in candidate_views:
+            canonical_view = view_path[:-3] if view_path.endswith('.xaml.cs') else view_path
+            if canonical_view in seen_views:
+                continue
+            seen_views.add(canonical_view)
+            txt = safe_read_text(repo / canonical_view)
+            deps = sorted(edges.get(canonical_view, set()) | edges.get(canonical_view + '.cs', set()))
+            consumers = sorted(reverse_edges.get(canonical_view, []) + reverse_edges.get(canonical_view + '.cs', []))
+            vm_links = [dep for dep in deps if '/ViewModels/' in dep or dep.endswith('ViewModel.cs')]
+            service_links = [dep for dep in deps if '/Services/' in dep or dep.endswith('Service.cs')]
+            command_links = [dep for dep in deps if '/Commands/' in dep or dep.endswith('Command.cs')]
+            control_links = [dep for dep in deps if '/Controls/' in dep or dep.endswith('.xaml') and '/Views/' not in dep]
+            for m in XAML_DATACONTEXT_RE.finditer(txt):
+                name = m.group('name').split('.')[-1]
+                for candidate in set(edges.keys()) | set(reverse_edges.keys()):
+                    if candidate.lower().endswith('.cs') and name.lower() in candidate.lower() and candidate not in vm_links:
+                        vm_links.append(candidate)
+            for m in XAML_COMMAND_RE.finditer(txt):
+                name = m.group('name').lower()
+                for candidate in set(edges.keys()) | set(reverse_edges.keys()):
+                    lower_candidate = candidate.lower()
+                    if lower_candidate.endswith('.cs') and (name in lower_candidate or 'command' in lower_candidate) and candidate not in command_links:
+                        command_links.append(candidate)
+            codebehind_txt = safe_read_text(repo / (canonical_view + '.cs')) if (repo / (canonical_view + '.cs')).exists() else ''
+            for m in CS_NEW_RE.finditer(codebehind_txt):
+                created = m.group('name').lower()
+                for candidate in set(edges.keys()) | set(reverse_edges.keys()):
+                    lower_candidate = candidate.lower()
+                    if not lower_candidate.endswith('.cs'):
+                        continue
+                    if created in lower_candidate:
+                        if '/viewmodels/' in lower_candidate or created.endswith('viewmodel'):
+                            if candidate not in vm_links:
+                                vm_links.append(candidate)
+                        elif '/services/' in lower_candidate or created.endswith('service'):
+                            if candidate not in service_links:
+                                service_links.append(candidate)
+                        elif '/commands/' in lower_candidate or created.endswith('command'):
+                            if candidate not in command_links:
+                                command_links.append(candidate)
+            click_handlers = [m.group('name') for m in XAML_CLICK_RE.finditer(txt)]
+            command_names = [m.group('name') for m in XAML_COMMAND_RE.finditer(txt)]
+            codebehind_commands = [m.group('name') for m in CS_COMMAND_PROP_RE.finditer(codebehind_txt)]
+            score = len(vm_links) * 3 + len(service_links) * 2 + len(command_links) * 2 + len(control_links) + len(consumers)
+            if canonical_view.lower().endswith('mainwindow.xaml'):
+                score += 4
+            if '/controls/' in canonical_view.lower():
+                score += 2
+            interaction_hints = click_handlers[:4] + command_names[:4] + codebehind_commands[:4]
+            rows.append((score, canonical_view, vm_links[:5], service_links[:5], command_links[:5], control_links[:5], interaction_hints[:8]))
+        rows.sort(key=lambda item: (-item[0], item[1]))
+        return rows[:10]
+
     def business_risk_profile(file_path: str, out_degree: int, in_degree: int) -> Tuple[int, List[str]]:
         score = out_degree + in_degree
         reasons: List[str] = []
@@ -3226,6 +3306,30 @@ def render_blast_map(
                 lines.append(f"- Structured symbols in file: {', '.join(f'`{item}`' for item in app_symbols[:6])}")
     else:
         lines.append("- (No frontend/app-side feature flow map detected yet.)")
+    lines.append("")
+
+    lines.append("## Desktop view / viewmodel / command impact")
+    desktop_flow_map = build_desktop_flow_map()
+    if desktop_flow_map:
+        for score, view_path, vm_links, service_links, command_links, control_links, interaction_hints in desktop_flow_map:
+            lines.append(f"### If changing `{view_path}`")
+            lines.append(f"- Desktop-flow score: `{score}`")
+            if vm_links:
+                lines.append(f"- Likely ViewModel links: {', '.join(f'`{item}`' for item in vm_links[:5])}")
+            if service_links:
+                lines.append(f"- Likely service links: {', '.join(f'`{item}`' for item in service_links[:5])}")
+            if command_links:
+                lines.append(f"- Likely command links: {', '.join(f'`{item}`' for item in command_links[:5])}")
+            if control_links:
+                lines.append(f"- Nested control links: {', '.join(f'`{item}`' for item in control_links[:5])}")
+            if interaction_hints:
+                lines.append(f"- Interaction hints: {', '.join(f'`{item}`' for item in interaction_hints[:8])}")
+            if '/controls/' in view_path.lower():
+                lines.append("- Likely shared desktop UI impact: reused controls may shift multiple windows/pages")
+            else:
+                lines.append("- Likely desktop flow impact: view wiring, commands, or injected services may shift")
+    else:
+        lines.append("- (No desktop view/viewmodel/command flow detected yet.)")
     lines.append("")
 
     lines.append("## Shared frontend component / state blast radius")
