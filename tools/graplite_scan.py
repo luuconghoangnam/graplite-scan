@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -1454,6 +1455,9 @@ def render_blast_map(
     scip_index_status: ScipIndexStatus,
     scip_symbols_by_file: Dict[str, List[str]],
     blast_name: str,
+    diff_range: str = '',
+    changed_files: Optional[List[str]] = None,
+    diff_error: str = '',
 ) -> List[str]:
     def is_generic_route_symbol(symbol: str) -> bool:
         lower = symbol.lower().strip()
@@ -1797,6 +1801,39 @@ def render_blast_map(
         lines.append("- (No route-centric impact available.)")
     lines.append("")
 
+    lines.append("## Diff-aware impact")
+    if diff_range:
+        lines.append(f"- Diff range: `{diff_range}`")
+        if diff_error:
+            lines.append(f"- Diff error: `{diff_error}`")
+        elif changed_files:
+            lines.append(f"- Changed files: {', '.join(f'`{x}`' for x in changed_files[:20])}")
+            matched_routes: List[str] = []
+            seen_routes: Set[str] = set()
+            changed_symbol_labels: List[str] = []
+            seen_symbol_labels: Set[str] = set()
+            for file_path in changed_files:
+                for route in file_to_routes.get(file_path, []):
+                    if route not in seen_routes:
+                        seen_routes.add(route)
+                        matched_routes.append(route)
+                for symbol in scip_symbols_by_file.get(file_path, []):
+                    label = f'{file_path} :: {symbol}'
+                    if label not in seen_symbol_labels:
+                        seen_symbol_labels.add(label)
+                        changed_symbol_labels.append(label)
+            if matched_routes:
+                lines.append(f"- Likely impacted routes: {', '.join(f'`{x}`' for x in matched_routes[:12])}")
+            if changed_symbol_labels:
+                lines.append(f"- Changed-file SCIP symbols: {', '.join(f'`{x}`' for x in changed_symbol_labels[:10])}")
+            if not matched_routes and not changed_symbol_labels:
+                lines.append("- No flow-aware route/symbol matches for changed files yet.")
+        else:
+            lines.append("- No changed files detected for this range.")
+    else:
+        lines.append("- (Run with `--diff-range <range>` to map changed files to impacted routes/symbols.)")
+    lines.append("")
+
     lines.append("## Change recipes")
     if backend_entry:
         lines.append(f"- If changing `{backend_entry}`: verify server boots, health endpoints, route registration, WS on/off")
@@ -1840,7 +1877,26 @@ def render_blast_map(
     return lines
 
 
-def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tuple[Path, Path]:
+def git_changed_files(repo: Path, diff_range: str) -> Tuple[List[str], str]:
+    if not diff_range:
+        return [], ''
+    try:
+        proc = subprocess.run(
+            ['git', 'diff', '--name-only', diff_range],
+            cwd=str(repo),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as err:
+        return [], str(err)
+    if proc.returncode != 0:
+        return [], (proc.stderr or proc.stdout or f'git diff exited {proc.returncode}').strip()
+    files = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    return files, ''
+
+
+def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_range: str = '') -> Tuple[Path, Path]:
     ignore_dirs = set(DEFAULT_IGNORE_DIRS)
     scan_subdirs = detect_scan_subdirs(repo)
     tree = list_tree(repo, max_depth=3, ignore_dirs=ignore_dirs)
@@ -1882,6 +1938,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
     top_summary = top_level_summary(repo, ignore_dirs)
     module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
     edge_details = file_dependency_details(edges, ranked_files)
+    changed_files, diff_error = git_changed_files(repo, diff_range)
 
     fast_lines = render_fast_map(
         repo=repo,
@@ -1921,6 +1978,9 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
         scip_index_status=scip_index_status,
         scip_symbols_by_file=scip_symbols_by_file,
         blast_name=blast_name,
+        diff_range=diff_range,
+        changed_files=changed_files,
+        diff_error=diff_error,
     )
 
     fast_path = out_dir / fast_name
@@ -1938,6 +1998,7 @@ def main() -> None:
     ap.add_argument("--mode", choices=["project", "agent-claude", "short"], default="project")
     ap.add_argument("--fast-file", default="", help="Override first output filename")
     ap.add_argument("--blast-file", default="", help="Override second output filename")
+    ap.add_argument("--diff-range", default="", help="Optional git diff range, e.g. HEAD~1..HEAD")
     args = ap.parse_args()
 
     repo = Path(args.repo).expanduser().resolve()
@@ -1960,7 +2021,7 @@ def main() -> None:
         blast_name = args.blast_file or "PROJECT_BLAST_RADIUS.md"
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    fast, blast = scan_repo(repo, out_dir, fast_name=fast_name, blast_name=blast_name)
+    fast, blast = scan_repo(repo, out_dir, fast_name=fast_name, blast_name=blast_name, diff_range=args.diff_range)
     print("OK")
     print("FAST:", fast)
     print("BLAST:", blast)
