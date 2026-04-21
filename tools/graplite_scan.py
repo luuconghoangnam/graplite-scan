@@ -1335,6 +1335,15 @@ def render_blast_map(
             'uploadurl', 'downloadurl', 'deletechunk', 'cleanupsession', 'attachreceiver',
             'createsession', 'touchsession', 'completesession', 'getsession', 'getcompletionflags'
         }
+        provider_allowed_terms: Set[str] = set()
+        if 'getchunkuploadurl' in service_keywords:
+            provider_allowed_terms.update({'getuploadurl'})
+        if 'getchunkdownloadurl' in service_keywords:
+            provider_allowed_terms.update({'getdownloadurl', 'chunkexists'})
+        if 'deletechunk' in service_keywords:
+            provider_allowed_terms.update({'deletechunk'})
+        if 'completesession' in service_keywords:
+            provider_allowed_terms.update({'cleanupsession'})
         has_explicit_route_method = bool(service_keywords)
         ranked: List[Tuple[int, str, int, int, bool, bool, bool, str]] = []
         seen: Set[str] = set()
@@ -1446,10 +1455,14 @@ def render_blast_map(
                         score += 26
                     if 'getchunkdownloadurl' in service_keywords and 'getdownloadurl' in lower_symbol:
                         score += 26
+                    if 'getchunkdownloadurl' in service_keywords and 'chunkexists' in lower_symbol:
+                        score += 20
                     if 'deletechunk' in service_keywords and 'deletechunk' in lower_symbol:
                         score += 24
                     if 'completesession' in service_keywords and 'cleanupsession' in lower_symbol:
                         score += 24
+                    if provider_allowed_terms and not any(term in lower_symbol for term in provider_allowed_terms):
+                        score -= 28
                     if 'attachreceiver' in service_keywords and 'attachreceiver' not in lower_symbol:
                         score -= 6
 
@@ -1475,7 +1488,10 @@ def render_blast_map(
             elif partial_matches > 0 and is_method:
                 keep = True
             elif is_provider_file and any(term in lower_name for term in ('getuploadurl', 'getdownloadurl', 'deletechunk', 'cleanupsession', 'chunkexists')):
-                keep = True
+                if not provider_allowed_terms:
+                    keep = True
+                else:
+                    keep = any(term in lower_name for term in provider_allowed_terms)
             elif not has_explicit_route_method:
                 keep = is_method
 
