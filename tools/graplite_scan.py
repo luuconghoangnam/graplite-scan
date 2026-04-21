@@ -968,7 +968,8 @@ def nested_module_summary(
     preferred_groups = {
         'app', 'pages', 'routes', 'features', 'components', 'widgets', 'hooks',
         'stores', 'state', 'composables', 'layouts', 'core', 'lib', 'modules',
-        'services', 'controllers', 'gateways', 'providers', 'api'
+        'services', 'controllers', 'gateways', 'providers', 'api', 'views',
+        'viewmodels', 'controls', 'models', 'converters', 'commands'
     }
 
     def add_group(rel: str, desc: str) -> None:
@@ -1132,7 +1133,7 @@ def architecture_summary_lines(
 
     subsystem_bits: List[str] = []
     frontend_roots = {'app', 'frontend', 'client', 'web'}
-    if top_names & frontend_roots or flutter_entry:
+    if (top_names & frontend_roots) or (flutter_entry and not flutter_entry.endswith('.xaml')):
         if frontend_labels:
             subsystem_bits.append(f"frontend shape: {', '.join(f'`{name}`' for name in frontend_labels[:5])}")
         elif app_groups:
@@ -1192,6 +1193,18 @@ def architecture_summary_lines(
                         seen_flow_files.add(file_path)
                         flow_files.append(file_path)
         lines.append(f"- Detected route/flow coverage: {len(unique_routes)} route paths with chain hints across {len(flow_files)} source files")
+    elif desktop_groups:
+        desktop_surface_counts = {
+            'views': len([name for name in desktop_groups if name.startswith('Views/')]),
+            'viewmodels': len([name for name in desktop_groups if name.startswith('ViewModels/')]),
+            'controls': len([name for name in desktop_groups if name.startswith('Controls/')]),
+            'services': len([name for name in desktop_groups if name.startswith('Services/')]),
+        }
+        summary_parts = [
+            f"{count} {label}" for label, count in desktop_surface_counts.items() if count
+        ]
+        if summary_parts:
+            lines.append(f"- Desktop flow coverage: {', '.join(summary_parts[:4])}")
 
     gateway_files = list(gateway_hints.keys())
     if gateway_files:
@@ -1309,6 +1322,20 @@ def render_architecture_mermaid(
         }
         return mapping.get(base, (7, shorten_label(base or normalized.split('/')[-1], 24)))
 
+    def classify_desktop_group(path: str) -> Tuple[int, str]:
+        normalized = path.rstrip('/')
+        base = normalized.split('/')[-1].lower()
+        mapping = {
+            'views': (1, 'desktop views'),
+            'viewmodels': (2, 'viewmodels'),
+            'controls': (3, 'shared controls'),
+            'commands': (4, 'commands'),
+            'services': (5, 'services'),
+            'converters': (6, 'binding converters'),
+            'models': (7, 'models'),
+        }
+        return mapping.get(base, (8, shorten_label(base or normalized.split('/')[-1], 24)))
+
     def runtime_label(file_path: str) -> str:
         base = file_path.split('/')[-1]
         mapping = {
@@ -1329,6 +1356,9 @@ def render_architecture_mermaid(
             'app.jsx': 'app shell',
             'page.tsx': 'route page',
             'page.jsx': 'route page',
+            'program.cs': 'desktop bootstrap',
+            'app.xaml': 'desktop app shell',
+            'mainwindow.xaml': 'main window',
         }
         return mapping.get(base.lower(), shorten_label(base, 24))
 
@@ -1341,12 +1371,15 @@ def render_architecture_mermaid(
         'src/composables/', 'src/layouts/', 'frontend/src/', 'client/src/', 'web/src/',
         'pages/', 'components/', 'routes/'
     )
+    desktop_prefixes = ('Views/', 'ViewModels/', 'Controls/', 'Models/', 'Converters/', 'Commands/', 'Services/')
     backend_prefixes = ('backend/src/modules/', 'server/', 'services/', 'api/')
 
     frontend_groups = [name for name in module_names if name.startswith(frontend_prefixes)]
+    desktop_groups = [name for name in module_names if name.startswith(desktop_prefixes)]
     backend_groups = [name for name in module_names if name.startswith(backend_prefixes)]
-    has_frontend = bool(frontend_groups or flutter_entry or (top_names & {'app', 'frontend', 'client', 'web'}))
-    has_backend = bool(backend_groups or backend_entry or 'backend' in top_names or 'server' in top_names)
+    has_desktop = bool(desktop_groups or backend_entry == 'Program.cs' or (flutter_entry and flutter_entry.endswith('.xaml')))
+    has_frontend = bool(frontend_groups or ((flutter_entry and not flutter_entry.endswith('.xaml'))) or (top_names & {'app', 'frontend', 'client', 'web'}))
+    has_backend = bool((backend_groups or backend_entry or 'backend' in top_names or 'server' in top_names) and not has_desktop)
 
     if has_frontend:
         add_node('app_surface', 'frontend / app shell')
@@ -1355,14 +1388,23 @@ def render_architecture_mermaid(
         backend_label = 'backend / API' if route_flow_hints else 'backend / services'
         add_node('backend_surface', backend_label)
         add_edge('repo', 'backend_surface')
+    if has_desktop:
+        add_node('desktop_surface', 'desktop app shell')
+        add_edge('repo', 'desktop_surface')
 
     if flutter_entry and has_frontend:
         add_node('app_entry', runtime_label(flutter_entry))
         add_edge('app_surface', 'app_entry', 'entry')
+    elif flutter_entry and has_desktop:
+        add_node('desktop_entry', runtime_label(flutter_entry))
+        add_edge('desktop_surface', 'desktop_entry', 'entry')
 
     if backend_entry and has_backend:
         add_node('backend_entry', 'backend entry')
         add_edge('backend_surface', 'backend_entry', 'entry')
+    elif backend_entry and has_desktop:
+        add_node('desktop_bootstrap', runtime_label(backend_entry))
+        add_edge('desktop_surface', 'desktop_bootstrap', 'entry')
 
     selected_frontend: List[Tuple[int, str, str]] = []
     for name in frontend_groups:
@@ -1376,6 +1418,12 @@ def render_architecture_mermaid(
         selected_backend.append((priority, label, name))
     selected_backend.sort(key=lambda item: (item[0], item[1], item[2]))
 
+    selected_desktop: List[Tuple[int, str, str]] = []
+    for name in desktop_groups:
+        priority, label = classify_desktop_group(name)
+        selected_desktop.append((priority, label, name))
+    selected_desktop.sort(key=lambda item: (item[0], item[1], item[2]))
+
     frontend_node_ids_by_label: Dict[str, str] = {}
     for priority, label, name in selected_frontend[:4]:
         node_id = 'mod_app_' + mermaid_safe_id(name)
@@ -1387,6 +1435,13 @@ def render_architecture_mermaid(
         node_id = 'mod_backend_' + mermaid_safe_id(name)
         add_node(node_id, label)
         add_edge('backend_surface', node_id, 'group')
+
+    desktop_node_ids_by_label: Dict[str, str] = {}
+    for _priority, label, name in selected_desktop[:5]:
+        node_id = 'mod_desktop_' + mermaid_safe_id(name)
+        desktop_node_ids_by_label[label] = node_id
+        add_node(node_id, label)
+        add_edge('desktop_surface', node_id, 'group')
 
     ranked_route_hints = sorted(
         route_flow_hints,
@@ -1454,6 +1509,18 @@ def render_architecture_mermaid(
         add_node(flow_id, runtime_label(file_path))
         add_edge(prev_spine, flow_id, 'spine')
         prev_spine = flow_id
+
+    if has_desktop:
+        desktop_story_order = ['desktop views', 'viewmodels', 'shared controls', 'commands', 'services', 'binding converters', 'models']
+        prev_desktop = 'desktop_entry' if 'desktop_entry' in added_nodes else ('desktop_bootstrap' if 'desktop_bootstrap' in added_nodes else 'desktop_surface')
+        seen_desktop_story: Set[str] = set()
+        for label in desktop_story_order:
+            node_id = desktop_node_ids_by_label.get(label)
+            if not node_id or node_id in seen_desktop_story:
+                continue
+            seen_desktop_story.add(node_id)
+            add_edge(prev_desktop, node_id, 'spine')
+            prev_desktop = node_id
 
     if has_frontend:
         frontend_story_order = [
@@ -1523,8 +1590,14 @@ def render_architecture_mermaid(
         lines.extend(app_defs)
         lines.append('    end')
     if backend_defs:
-        lines.append('    subgraph BACKEND["Backend / Server"]')
+        backend_title = 'Desktop / Server' if has_desktop else 'Backend / Server'
+        lines.append(f'    subgraph BACKEND["{backend_title}"]')
         lines.extend(backend_defs)
+        lines.append('    end')
+    desktop_defs = [line for line in node_defs if 'desktop_' in line or 'mod_desktop_' in line]
+    if has_desktop and desktop_defs:
+        lines.append('    subgraph DESKTOP["Desktop / Windows App"]')
+        lines.extend(desktop_defs)
         lines.append('    end')
     if flow_defs:
         flow_title = 'Runtime spine' if not route_flow_hints else 'Route / runtime spine'
