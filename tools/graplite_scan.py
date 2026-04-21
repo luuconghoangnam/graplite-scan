@@ -202,6 +202,7 @@ class ScipIndexStatus:
     reference_count: int
     structured_occurrence_hints: List[str]
     structured_top_reference_hints: List[str]
+    structured_occurrence_stats: Dict[str, Dict[str, int]]
 
 
 def is_ignored(path: Path, ignore_dirs: Set[str]) -> bool:
@@ -1007,6 +1008,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             reference_count=0,
             structured_occurrence_hints=[],
             structured_top_reference_hints=[],
+            structured_occurrence_stats={},
         )
     if not index_path.exists() or not index_path.is_file():
         return ScipIndexStatus(
@@ -1027,6 +1029,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             reference_count=0,
             structured_occurrence_hints=[],
             structured_top_reference_hints=[],
+            structured_occurrence_stats={},
         )
     try:
         file_stat = index_path.stat()
@@ -1144,6 +1147,14 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             reference_count=reference_count,
             structured_occurrence_hints=structured_occurrence_hints,
             structured_top_reference_hints=structured_top_reference_hints,
+            structured_occurrence_stats={
+                symbol: {
+                    'refs': int(symbol_stat['refs']),
+                    'defs': int(symbol_stat['defs']),
+                    'docs': len(symbol_stat['docs']),
+                }
+                for symbol, symbol_stat in occurrence_stats.items()
+            },
         )
     except Exception as err:
         return ScipIndexStatus(
@@ -1164,6 +1175,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             reference_count=0,
             structured_occurrence_hints=[],
             structured_top_reference_hints=[],
+            structured_occurrence_stats={},
         )
 
 
@@ -1443,6 +1455,20 @@ def render_blast_map(
     scip_symbols_by_file: Dict[str, List[str]],
     blast_name: str,
 ) -> List[str]:
+    def is_generic_route_symbol(symbol: str) -> bool:
+        lower = symbol.lower().strip()
+        if not lower:
+            return True
+        if lower in {'process', 'console', 'promise', 'string', 'number', 'boolean', 'object', 'array', 'map', 'set', 'date', 'error'}:
+            return True
+        if lower.startswith(('node:', 'globalthis#', 'process#', 'console#', 'map#', 'set#', 'array#', 'promise#', 'fastifyreply#', 'fastifyrequest#', 'dateconstructor#')):
+            return True
+        if any(token in lower for token in ('fastifyreply#', 'fastifyrequest#', 'incomingmessage#', 'serverresponse#', '__type', '<', 'typeof ')):
+            return True
+        if symbol.startswith('"') and symbol.endswith('"'):
+            return True
+        return False
+
     def extract_route_keywords(chain: List[str]) -> List[str]:
         keywords: List[str] = []
         for step in chain:
@@ -1593,6 +1619,19 @@ def render_blast_map(
                         score -= 28
                     if 'attachreceiver' in service_keywords and 'attachreceiver' not in lower_symbol:
                         score -= 6
+
+                occurrence_stat = scip_index_status.structured_occurrence_stats.get(symbol, {})
+                refs = int(occurrence_stat.get('refs', 0))
+                defs = int(occurrence_stat.get('defs', 0))
+                docs = int(occurrence_stat.get('docs', 0))
+                if refs:
+                    score += min(refs, 25)
+                if defs:
+                    score += min(defs * 3, 12)
+                if docs > 1:
+                    score += min((docs - 1) * 4, 16)
+                if is_generic_route_symbol(symbol):
+                    score -= 24
 
                 if score <= 0 and not is_method:
                     continue
