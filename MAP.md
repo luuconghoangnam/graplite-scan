@@ -31,10 +31,80 @@ docs/
   CLI_IDEAS.md
   NEXT_UPGRADE_PLAN.md
   PROJECT_ONBOARDING_PLAYBOOK.md
+  REFERENCE_DRIVEN_ROADMAP.md
   REFERENCE_NOTES_code-review-graph.md
   TODO_NEXT.md
 output/
 references/
+  bloop/
+    .github/
+      ISSUE_TEMPLATE/
+      workflows/
+    apps/
+      desktop/
+    bleep.db
+    client/
+      .storybook/
+      public/
+      src/
+      tests/
+      .gitignore
+      index.html
+      jest.config.js
+      package-lock.json
+      package.json
+      postcss.config.cjs
+      README.md
+      tailwind.config.cjs
+      tsconfig.json
+      tsconfig.node.json
+      vite.config.ts
+    model/
+      ggml/
+      model.onnx
+      special_tokens_map.json
+      tokenizer.json
+      tokenizer_config.json
+      vocab.txt
+    server/
+      bleep/
+      languages.yml
+      README.md
+    tests/
+      .example.env
+      .gitignore
+      all_onboarding.spec.js_
+      github_onboarding.spec.js_
+      local_onboarding.spec.js_
+      onboarding.spec.ts
+      onboarding.ts
+      repository.spec.ts
+      search.spec.ts
+      settings.spec.ts
+      tsconfig.json
+    .dockerignore
+    .env.example
+    .envrc
+    .eslintrc.json
+    .gitattributes
+    .gitignore
+    .gitpod.Dockerfile
+    .gitpod.yml
+    .taurignore
+    Cargo.lock
+    Cargo.toml
+    CODE_OF_CONDUCT.md
+    CONTRIBUTING.md
+    docker-compose.yml
+    Dockerfile
+    flake.lock
+    flake.nix
+    LICENSE
+    package-lock.json
+    package.json
+    playwright.config.js
+    README.md
+    release_description_template.txt
   code-review-graph/
     .github/
       workflows/
@@ -191,6 +261,113 @@ references/
     README.zh-CN.md
     SECURITY.md
     uv.lock
+  honk/
+    keyword_spotting_data_generator/
+      extractor/
+      utils/
+      keyword_data_generator.py
+      README.md
+      requirements.txt
+      url_fetcher.py
+      wordset.py
+      youtube_processor.py
+      youtube_searcher.py
+    logo/
+      files
+      Logomark black.cdr
+      Logomark black.png
+      Logomark black.svg
+      Logomark white.cdr
+      Logomark white.png
+      Logomark white.svg
+      Logomark.cdr
+      Logomark.png
+      Logomark.svg
+      Logotype horizontal black.cdr
+      Logotype horizontal black.png
+      Logotype horizontal black.svg
+      Logotype horizontal white.cdr
+      Logotype horizontal white.svg
+      Logotype horizontal.cdr
+      Logotype horizontal.png
+      Logotype horizontal.svg
+      Logotype vertical black.cdr
+      Logotype vertical black.png
+      Logotype vertical black.svg
+      Logotype vertical white.cdr
+      Logotype vertical white.png
+      Logotype vertical white.svg
+      Logotype vertical.cdr
+      Logotype vertical.png
+      Logotype vertical.svg
+    raspberry_pi_experiments/
+      analysis.ipynb
+      analysis_plots.Rmd
+      experiment_output_e2e.txt
+      experiment_output_preprocessing.txt
+      power_consumption_benchmark.py
+      README.md
+      wattsup_server.py
+    utils/
+      speech_commands_example/
+      __init__.py
+      anserini-awake.png
+      anserini-inactive.png
+      anserini-open.png
+      client.py
+      fonts.png
+      manage_audio.py
+      model.py
+      record.py
+      speech_demo.py
+      speech_demo_tk.py
+      train.py
+    .gitignore
+    __main__.py
+    config.json
+    fetch_data.sh
+    LICENSE
+    measure_power.py
+    README.md
+    README.windows.md
+    requirements.txt
+    requirements_rpi.txt
+    server.py
+    service.py
+  lsif-node/
+    .github/
+      workflows/
+      PULL_REQUEST_TEMPLATE.md
+    src/
+      emitter.ts
+      graph.ts
+      is.ts
+      linker.ts
+      lsif.ts
+      main.ts
+      moniker.ts
+      package.ts
+      paths.ts
+      typescripts.ts
+      typings.ts
+      writer.ts
+    .eslintrc.js
+    .gitignore
+    .prettierignore
+    .prettierrc
+    .tool-versions
+    CHANGELOG.md
+    Dockerfile
+    Dockerfile.autoindex
+    LICENSE
+    OLD_README.md
+    package.json
+    prettier.config.js
+    README.md
+    renovate.json
+    tsconfig.json
+    tslint.json
+    yarn.lock
   scip/
     .github/
       ISSUE_TEMPLATE/
@@ -293,102 +470,88 @@ references/
     renovate.json
     tsconfig.json
     yarn.lock
-  tree-sitter/
-    .cargo/
-      config.toml
+  semgrep/
     .github/
-      actions/
       ISSUE_TEMPLATE/
-      scripts/
+      PULL_REQUEST_TEMPLATE/
       workflows/
-      cliff.toml
-      dependabot.yml
-      FUNDING.yml
-    .zed/
-      settings.json
-    crates/
-      cli/
-      config/
-      generate/
-      highlight/
-      language/
-      loader/
-      tags/
-      xtask/
-    docs/
+      actionlint.yaml
+      CODEOWNERS
+      pull_request_template.md
+      stale.yml
+    bin
+    changelog.d/
+      gh-1234.example
+      README
+    cli/
       src/
-      theme/
-      .gitignore
-      book.toml
-      package.nix
-    lib/
-      binding_rust/
-      binding_web/
-      include/
-      lldb_pretty_printers/
-      src/
-      .ccls
-      Cargo.toml
+      stubs/
+      tests/
       LICENSE
-      package.nix
-      README.md
-      tree-sitter.pc.in
-    test/
-      fixtures/
-    .dockerignore
-    .editorconfig
-    .envrc
-    .gitattributes
-    .gitignore
-    .taplo.toml
-    build.zig
-    build.zig.zon
-    Cargo.lock
-    Cargo.toml
-    CMakeLists.txt
-    CONTRIBUTING.md
-    Dockerfile
-    flake.lock
-    flake.nix
-    FUNDING.json
-    LICENSE
-    Makefile
-    Package.swift
-    README.md
-scripts/
-  fetch-references.sh
-  setup-local.sh
-shell/
-  graplite.sh
-templates/
-  gitignore.snippet.txt
-  graplite.config.example.json
-  target-runner.sh
-tools/
-  graplite_doctor.py
-  graplite_init.py
-  graplite_install.py
-  graplite_scan.py
-  render_drops_maps.py
-  scan_repo.sh
-.gitignore
-ARCHITECTURE.mmd
-IMPACT.md
-MAP.md
-package.json
-README.md
-RELEASE.md
-SETUP.md
+      Makefile
+      MANIFEST.in
+      park.cfg
+      pyproject.toml
+      setup.py
+      uv.lock
+    dev/
+      optional.opam
+      required.opam
+    images/
+      semgrep-api-token.jpg
+      semgrep-auto-config-example.jpg
+      semgrep-ci-cd-popup.jpg
+      semgrep-example-rules-editor.jpg
+      semgrep-login.jpg
+      semgrep-logo-dark.svg
+      semgrep-logo-light.svg
+      semgrep-main-image.jpg
+      semgrep-scan-cli.jpg
+    interfaces/
+      semgrep_interfaces/
+      notes.txt
+      Parsing_stats.atd
+      Rule_options.atd
+      Semgrep_prefilter.atd
+    languages/
+      bash/
+      cairo/
+      circom/
+      cpp/
+      csharp/
+      dart/
+      dockerfile/
+      fga/
+      go/
+      hack/
 ```
 
 ## Key manifests (depth<=4)
 ```
 README.md
 package.json
+references/bloop/.env.example
+references/bloop/Cargo.toml
+references/bloop/Dockerfile
+references/bloop/README.md
+references/bloop/client/README.md
+references/bloop/client/package.json
+references/bloop/docker-compose.yml
+references/bloop/package.json
+references/bloop/server/README.md
 references/code-review-graph/README.md
 references/code-review-graph/code-review-graph-vscode/README.md
 references/code-review-graph/code-review-graph-vscode/package.json
 references/code-review-graph/pyproject.toml
+references/honk/README.md
+references/honk/keyword_spotting_data_generator/README.md
+references/honk/keyword_spotting_data_generator/requirements.txt
+references/honk/raspberry_pi_experiments/README.md
+references/honk/requirements.txt
+references/lsif-node/Dockerfile
+references/lsif-node/README.md
+references/lsif-node/package.json
+references/lsif-node/yarn.lock
 references/scip-typescript/Dockerfile
 references/scip-typescript/README.md
 references/scip-typescript/package.json
@@ -400,6 +563,15 @@ references/scip/go.mod
 references/scip/reprolang/README.md
 references/scip/reprolang/go.mod
 references/scip/reprolang/package.json
+references/semgrep/Dockerfile
+references/semgrep/README.md
+references/semgrep/cli/pyproject.toml
+references/semgrep/opam-lockfiles/README.md
+references/semgrep/perf/README.md
+references/semgrep/tests/README.md
+references/static-analysis/README.md
+references/static-analysis/ci/Cargo.toml
+references/static-analysis/data/README.md
 references/tree-sitter/Cargo.toml
 references/tree-sitter/Dockerfile
 references/tree-sitter/README.md
@@ -449,7 +621,7 @@ references/tree-sitter/lib/README.md
 | py:function | `main` | `tools/graplite_install.py:12` | 39 |
 | py:function | `main` | `tools/graplite_init.py:54` | 39 |
 | py:function | `main` | `tools/render_drops_maps.py:110` | 39 |
-| py:function | `main` | `tools/graplite_scan.py:4041` | 8 |
+| py:function | `main` | `tools/graplite_scan.py:4089` | 8 |
 | py:function | `rec` | `tools/graplite_scan.py:411` | 3 |
 | py:function | `rec` | `tools/render_drops_maps.py:28` | 3 |
 | py:function | `list_tree` | `tools/graplite_scan.py:402` | 2 |
@@ -542,18 +714,20 @@ references/tree-sitter/lib/README.md
 | py:function | `build_app_feature_flow_map` | `tools/graplite_scan.py:2903` | 0 |
 | py:function | `classify_frontend_dep` | `tools/graplite_scan.py:2912` | 0 |
 | py:function | `candidate_frontend_files` | `tools/graplite_scan.py:2924` | 0 |
-| py:function | `add_app_router_companion_files` | `tools/graplite_scan.py:2934` | 0 |
-| py:function | `build_frontend_shared_surface_map` | `tools/graplite_scan.py:3016` | 0 |
-| py:function | `build_desktop_flow_map` | `tools/graplite_scan.py:3050` | 0 |
-| py:function | `append_matches` | `tools/graplite_scan.py:3067` | 0 |
-| py:function | `business_risk_profile` | `tools/graplite_scan.py:3133` | 0 |
-| py:function | `rank_route_symbols` | `tools/graplite_scan.py:3179` | 0 |
-| py:function | `route_priority_key` | `tools/graplite_scan.py:3562` | 0 |
-| py:function | `git_changed_files` | `tools/graplite_scan.py:3785` | 0 |
-| py:function | `parse_git_diff_ranges` | `tools/graplite_scan.py:3804` | 0 |
-| py:function | `extract_diff_symbol_candidates` | `tools/graplite_scan.py:3855` | 0 |
-| py:function | `git_changed_symbol_names` | `tools/graplite_scan.py:3877` | 0 |
-| py:function | `scan_repo` | `tools/graplite_scan.py:3924` | 0 |
+| py:function | `is_app_router_file` | `tools/graplite_scan.py:2934` | 0 |
+| py:function | `add_candidate` | `tools/graplite_scan.py:2940` | 0 |
+| py:function | `add_app_router_chain` | `tools/graplite_scan.py:2945` | 0 |
+| py:function | `build_frontend_shared_surface_map` | `tools/graplite_scan.py:3064` | 0 |
+| py:function | `build_desktop_flow_map` | `tools/graplite_scan.py:3098` | 0 |
+| py:function | `append_matches` | `tools/graplite_scan.py:3115` | 0 |
+| py:function | `business_risk_profile` | `tools/graplite_scan.py:3181` | 0 |
+| py:function | `rank_route_symbols` | `tools/graplite_scan.py:3227` | 0 |
+| py:function | `route_priority_key` | `tools/graplite_scan.py:3610` | 0 |
+| py:function | `git_changed_files` | `tools/graplite_scan.py:3833` | 0 |
+| py:function | `parse_git_diff_ranges` | `tools/graplite_scan.py:3852` | 0 |
+| py:function | `extract_diff_symbol_candidates` | `tools/graplite_scan.py:3903` | 0 |
+| py:function | `git_changed_symbol_names` | `tools/graplite_scan.py:3925` | 0 |
+| py:function | `scan_repo` | `tools/graplite_scan.py:3972` | 0 |
 | py:function | `check_bin` | `tools/graplite_doctor.py:9` | 0 |
 | py:function | `ensure_config` | `tools/graplite_init.py:13` | 0 |
 | py:function | `ensure_runner` | `tools/graplite_init.py:25` | 0 |
@@ -563,7 +737,6 @@ references/tree-sitter/lib/README.md
 | py:function | `detect_stack` | `tools/render_drops_maps.py:61` | 0 |
 | py:function | `parse_pkg_json` | `tools/render_drops_maps.py:73` | 0 |
 | py:function | `collect_commands` | `tools/render_drops_maps.py:79` | 0 |
-| py:function | `heuristic_entrypoints` | `tools/render_drops_maps.py:91` | 0 |
 
 ## Notes
 - Output này tối ưu để AI đọc nhanh: entrypoints, env, route map, transfer hooks, hotspots, symbol index.

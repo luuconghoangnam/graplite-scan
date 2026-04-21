@@ -2932,21 +2932,39 @@ def render_blast_map(
 
             app_router_siblings = ('layout.', 'template.', 'loading.', 'error.', 'not-found.', 'providers.')
 
-            def add_app_router_companion_files(file_path: str) -> None:
+            def is_app_router_file(file_path: str) -> bool:
+                lower = file_path.lower()
+                return any(token in lower for token in ('/app/', '/pages/', '/routes/')) and any(
+                    marker in lower for marker in ('page.', 'layout.', 'template.', 'loading.', 'error.', 'not-found.', 'providers.')
+                )
+
+            def add_candidate(child_rel: str) -> None:
+                if child_rel in edges and child_rel not in seen:
+                    seen.add(child_rel)
+                    candidates.append(child_rel)
+
+            def add_app_router_chain(file_path: str) -> None:
                 p = repo / file_path
-                parent = p.parent
-                if not parent.exists() or not parent.is_dir():
+                if not p.exists():
                     return
-                for child in sorted(parent.iterdir(), key=lambda item: item.name.lower()):
-                    if not child.is_file():
-                        continue
-                    lower_name = child.name.lower()
-                    if not any(lower_name.startswith(prefix) for prefix in app_router_siblings):
-                        continue
-                    child_rel = relpath_posix(child, repo)
-                    if child_rel in edges and child_rel not in seen:
-                        seen.add(child_rel)
-                        candidates.append(child_rel)
+                current = p.parent
+                visited_dirs: Set[Path] = set()
+                while current not in visited_dirs and current.exists() and current.is_dir():
+                    visited_dirs.add(current)
+                    for child in sorted(current.iterdir(), key=lambda item: item.name.lower()):
+                        if not child.is_file():
+                            continue
+                        lower_name = child.name.lower()
+                        if not any(lower_name.startswith(prefix) for prefix in app_router_siblings):
+                            continue
+                        add_candidate(relpath_posix(child, repo))
+                    rel_dir = relpath_posix(current, repo)
+                    if rel_dir in {'app', 'src/app', 'pages', 'src/pages', 'routes', 'src/routes', '.', ''}:
+                        break
+                    if current == repo:
+                        break
+                    current = current.parent
+
             preferred_roots = (
                 'src/app/', 'src/pages/', 'src/routes/', 'src/features/', 'src/components/',
                 'src/hooks/', 'src/stores/', 'src/state/', 'src/layouts/', 'frontend/src/',
@@ -2969,12 +2987,14 @@ def render_blast_map(
                 score = 0
                 if any(token in lower for token in ('/pages/', '/routes/', '/app/', '/features/')):
                     score += 4
-                if any(token in lower for token in ('page.', 'layout.', 'template.', 'loading.', 'error.', 'screen.', 'view.', 'tab_')):
+                if any(token in lower for token in ('page.', 'layout.', 'template.', 'loading.', 'error.', 'not-found.', 'screen.', 'view.', 'tab_')):
                     score += 4
                 if '/components/' in lower or '/widgets/' in lower:
                     score += 2
                 if deps:
                     score += min(len(deps), 4)
+                if is_app_router_file(file_path):
+                    score += 3
                 priority_files.append((-score, file_path))
             priority_files.sort()
             for _neg_score, file_path in priority_files[:10]:
@@ -2982,14 +3002,13 @@ def render_blast_map(
                     continue
                 seen.add(file_path)
                 candidates.append(file_path)
-                add_app_router_companion_files(file_path)
-            return candidates[:14]
+                if is_app_router_file(file_path):
+                    add_app_router_chain(file_path)
+            return candidates[:18]
 
         flow_rows: List[Tuple[str, List[str], List[str], List[str]]] = []
         for file_path in candidate_frontend_files():
             deps = sorted(edges.get(file_path, set()))
-            if not deps:
-                continue
             service_links: List[str] = []
             ui_links: List[str] = []
             state_links: List[str] = []
@@ -3011,7 +3030,36 @@ def render_blast_map(
                 lower = dep.lower()
                 if any(token in lower for token in ('platform', 'discovery', 'cloud_adapter', 'transfer_service', '/api/', '/gateway/', '/stores/', '/state/', '/hooks/', '/layouts/', '/providers/', '/context/', '/reducers/', '/shell/')):
                     frontend_spine.append(dep)
+
+            lower_file = file_path.lower()
+            if any(marker in lower_file for marker in ('page.', 'layout.', 'template.', 'loading.', 'error.', 'not-found.', 'providers.')):
+                current = (repo / file_path).parent
+                visited_dirs: Set[Path] = set()
+                while current not in visited_dirs and current.exists() and current.is_dir():
+                    visited_dirs.add(current)
+                    for child in sorted(current.iterdir(), key=lambda item: item.name.lower()):
+                        if not child.is_file():
+                            continue
+                        child_rel = relpath_posix(child, repo)
+                        child_lower = child_rel.lower()
+                        if child_rel == file_path:
+                            continue
+                        if any(marker in child_lower for marker in ('layout.', 'template.', 'loading.', 'error.', 'not-found.', 'providers.')):
+                            if child_rel not in supporting_links:
+                                supporting_links.append(child_rel)
+                            if child_rel not in frontend_spine:
+                                frontend_spine.append(child_rel)
+                    rel_dir = relpath_posix(current, repo)
+                    if rel_dir in {'app', 'src/app', 'pages', 'src/pages', 'routes', 'src/routes', '.', ''}:
+                        break
+                    if current == repo:
+                        break
+                    current = current.parent
+
+            if not deps and not supporting_links and not frontend_spine:
+                continue
             flow_rows.append((file_path, prioritized_side_effects[:8], supporting_links[:8], frontend_spine[:8]))
+        return flow_rows
         return flow_rows
 
     def build_frontend_shared_surface_map() -> List[Tuple[int, str, List[str], List[str], List[str]]]:
@@ -3035,11 +3083,11 @@ def render_blast_map(
             consumers = sorted(reverse_edges.get(file_path, []))
             if not consumers:
                 continue
-            page_consumers = [c for c in consumers if any(token in c.lower() for token in ('/pages/', '/routes/', '/app/', '/features/', 'page.', 'layout.', 'template.', 'loading.', 'error.', 'screen.', 'view.'))]
+            page_consumers = [c for c in consumers if any(token in c.lower() for token in ('/pages/', '/routes/', '/app/', '/features/', 'page.', 'layout.', 'template.', 'loading.', 'error.', 'not-found.', 'screen.', 'view.'))]
             state_consumers = [c for c in consumers if any(token in c.lower() for token in ('/hooks/', '/stores/', '/state/', '/composables/', '/context/', '/reducers/', '/providers/'))]
             component_consumers = [c for c in consumers if any(token in c.lower() for token in ('/components/', '/widgets/'))]
             score = len(consumers) + (len(page_consumers) * 2) + len(state_consumers)
-            if '/layouts/' in lower or '/providers/' in lower or '/shell/' in lower or any(token in lower for token in ('layout.', 'template.', 'loading.', 'error.')):
+            if '/layouts/' in lower or '/providers/' in lower or '/shell/' in lower or any(token in lower for token in ('layout.', 'template.', 'loading.', 'error.', 'not-found.')):
                 score += 3
             if '/stores/' in lower or '/state/' in lower or '/hooks/' in lower or '/context/' in lower or '/reducers/' in lower:
                 score += 2
