@@ -1,8 +1,9 @@
 # graplite-scan (private)
 
-Local/offline repo scanner that generates two **in-repo** Markdown files optimized for AI + human onboarding:
+Local/offline repo scanner that generates in-repo outputs optimized for AI + human onboarding:
 - `MAP.md`
 - `IMPACT.md`
+- `ARCHITECTURE.mmd`
 
 ## Goals
 - very short commands
@@ -27,6 +28,7 @@ That will:
 - create `scripts/graplite-scan.sh`
 - append a small graplite block into `.gitignore`
 - generate `MAP.md` + `IMPACT.md`
+- generate `ARCHITECTURE.mmd` (portable Mermaid architecture view)
 
 You can also run:
 

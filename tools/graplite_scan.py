@@ -913,6 +913,130 @@ def architecture_summary_lines(
     return lines
 
 
+
+def mermaid_safe_id(value: str) -> str:
+    cleaned = re.sub(r'[^A-Za-z0-9_]+', '_', value).strip('_')
+    return cleaned or 'node'
+
+
+def mermaid_safe_label(value: str) -> str:
+    return value.replace('"', "'")
+
+
+def render_architecture_mermaid(
+    repo: Path,
+    top_summary: List[Tuple[str, str]],
+    module_summary: List[Tuple[str, str]],
+    backend_entry: Optional[str],
+    flutter_entry: Optional[str],
+    route_flow_hints: List[RouteFlowHint],
+    gateway_hints: Dict[str, List[str]],
+) -> List[str]:
+    lines: List[str] = []
+    lines.append('flowchart TD')
+    lines.append(f'    repo["{mermaid_safe_label(repo.name)}"]')
+
+    added_nodes: Set[str] = set()
+    added_edges: Set[Tuple[str, str, str]] = set()
+
+    def add_node(node_id: str, label: str) -> None:
+        if node_id in added_nodes:
+            return
+        added_nodes.add(node_id)
+        lines.append(f'    {node_id}["{mermaid_safe_label(label)}"]')
+
+    def add_edge(src: str, dst: str, label: str = '') -> None:
+        key = (src, dst, label)
+        if key in added_edges:
+            return
+        added_edges.add(key)
+        if label:
+            lines.append(f'    {src} -->|{mermaid_safe_label(label)}| {dst}')
+        else:
+            lines.append(f'    {src} --> {dst}')
+
+    top_names = [name.rstrip('/') for name, _desc in filter_top_summary_items(top_summary)[:10]]
+    top_ids: Dict[str, str] = {}
+    for name in top_names:
+        node_id = f'top_{mermaid_safe_id(name)}'
+        top_ids[name] = node_id
+        add_node(node_id, name)
+        add_edge('repo', node_id)
+
+    if backend_entry:
+        add_node('backend_entry', backend_entry)
+        add_edge('repo', 'backend_entry', 'entry')
+        if 'backend' in top_ids:
+            add_edge(top_ids['backend'], 'backend_entry', 'runtime')
+
+    if flutter_entry:
+        add_node('app_entry', flutter_entry)
+        add_edge('repo', 'app_entry', 'entry')
+        if 'app' in top_ids:
+            add_edge(top_ids['app'], 'app_entry', 'runtime')
+
+    selected_modules: List[str] = []
+    for prefix, limit in (('backend/src/modules/', 4), ('app/lib/features/', 5), ('app/lib/core/', 4)):
+        picked = [name.rstrip('/') for name, _desc in module_summary if name.startswith(prefix)][:limit]
+        selected_modules.extend(picked)
+
+    for name in selected_modules:
+        node_id = f'mod_{mermaid_safe_id(name)}'
+        add_node(node_id, name)
+        add_edge('repo', node_id, 'group')
+        if name.startswith('backend/') and 'backend' in top_ids:
+            add_edge(top_ids['backend'], node_id)
+        elif name.startswith('app/') and 'app' in top_ids:
+            add_edge(top_ids['app'], node_id)
+
+    for hint in route_flow_hints[:6]:
+        route_id = f'route_{mermaid_safe_id(hint.method + '_' + hint.path)}'
+        add_node(route_id, f'{hint.method} {hint.path}')
+        if 'backend' in top_ids:
+            add_edge(top_ids['backend'], route_id, 'route')
+        elif backend_entry:
+            add_edge('backend_entry', route_id, 'route')
+        chain_files: List[str] = []
+        seen_files: Set[str] = set()
+        for step in hint.chain:
+            for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
+                file_path = file_match.split(':', 1)[0]
+                if file_path not in seen_files:
+                    seen_files.add(file_path)
+                    chain_files.append(file_path)
+        prev = route_id
+        for file_path in chain_files[:4]:
+            file_id = f'flow_{mermaid_safe_id(file_path)}'
+            add_node(file_id, file_path)
+            add_edge(prev, file_id, 'flows to')
+            prev = file_id
+
+    gateway_items = sorted(gateway_hints.items())[:6]
+    for file_path, hints in gateway_items:
+        gw_id = f'gw_{mermaid_safe_id(file_path)}'
+        add_node(gw_id, file_path)
+        lower = file_path.lower()
+        if lower.startswith('backend/') or any(token in lower for token in ('transfer.gateway', 'peer.gateway', 'controller.ts', 'service.ts', 'provider.ts')):
+            if 'backend' in top_ids:
+                add_edge(top_ids['backend'], gw_id, 'signal')
+            elif backend_entry:
+                add_edge('backend_entry', gw_id, 'signal')
+        else:
+            if 'app' in top_ids:
+                add_edge(top_ids['app'], gw_id, 'link')
+            elif flutter_entry:
+                add_edge('app_entry', gw_id, 'link')
+        for hint in hints[:2]:
+            if hint.startswith('dart:') or hint.startswith('package:'):
+                continue
+            hint_id = f'hint_{mermaid_safe_id(file_path + hint)}'
+            add_node(hint_id, hint[:60])
+            add_edge(gw_id, hint_id, 'hint')
+
+    return lines
+
+
+
 def filter_top_summary_items(items: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
     hidden_roots = {'.agent/', '.claude/', '.gitnexus/', 'graplite-scan/'}
     return [item for item in items if item[0] not in hidden_roots]
@@ -3025,10 +3149,22 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
         diff_error=diff_error,
     )
 
+    architecture_lines = render_architecture_mermaid(
+        repo=repo,
+        top_summary=top_summary,
+        module_summary=module_summary,
+        backend_entry=backend_entry,
+        flutter_entry=flutter_entry,
+        route_flow_hints=route_flow_hints,
+        gateway_hints=gateway_hints,
+    )
+
     fast_path = out_dir / fast_name
     blast_path = out_dir / blast_name
+    architecture_path = out_dir / 'ARCHITECTURE.mmd'
     fast_path.write_text("\n".join(fast_lines), encoding="utf-8")
     blast_path.write_text("\n".join(blast_lines), encoding="utf-8")
+    architecture_path.write_text("\n".join(architecture_lines) + "\n", encoding="utf-8")
     return fast_path, blast_path
 
 
