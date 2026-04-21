@@ -894,6 +894,15 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             return None
         if tail.endswith('.ts') or '/' in tail:
             return None
+        if tail.startswith('(') or '.(' in tail or tail.endswith('()()'):
+            return None
+        lower_tail = tail.lower()
+        if any(token in lower_tail for token in ('typeliteral', 'objectliteral', 'tupleliteral', 'indexsignature')):
+            return None
+        if any(token in lower_tail for token in ('<constructor>', 'constructorsignature', 'callsignature')):
+            return None
+        if any(token in lower_tail for token in (':parameter', ':local', ':meta')):
+            return None
         return tail
 
     def parse_document(buf: bytes) -> Tuple[str, str, List[str]]:
