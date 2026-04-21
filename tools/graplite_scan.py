@@ -83,6 +83,10 @@ TS_IMPORT_RE = re.compile(
     r"^\s*import\s+(?:type\s+)?[^;]*?from\s+['\"](?P<spec>[^'\"]+)['\"];?\s*$",
     re.M,
 )
+TS_SIDE_EFFECT_IMPORT_RE = re.compile(
+    r"^\s*import\s+['\"](?P<spec>[^'\"]+)['\"];?\s*$",
+    re.M,
+)
 DART_IMPORT_RE = re.compile(
     r"^\s*(?:import|export)\s+['\"](?P<spec>[^'\"]+)['\"];?\s*$",
     re.M,
@@ -138,6 +142,13 @@ DIR_RESP_HINTS = {
     'web': 'web app / frontend assets',
     'client': 'client-side code',
     'lib': 'shared/library source',
+    'pages': 'route/page modules',
+    'components': 'UI components',
+    'hooks': 'client hooks/state wiring',
+    'stores': 'state/store modules',
+    'composables': 'vue composables',
+    'api': 'API handlers or service endpoints',
+    'routes': 'router or endpoint definitions',
     'docs': 'architecture notes, plans, docs',
     'scripts': 'automation / helper scripts',
     'tools': 'developer tooling',
@@ -385,25 +396,47 @@ def detect_scan_subdirs(repo: Path) -> List[str]:
         "app/lib",
         "lib",
         "server",
-        "packages",
+        "frontend/src",
+        "client/src",
+        "web/src",
+        "src/app",
+        "src/pages",
+        "src/components",
+        "src/routes",
+        "src/features",
+        "src/hooks",
+        "src/stores",
+        "src/composables",
+        "pages",
+        "components",
+        "routes",
         "apps",
+        "packages",
         "services",
         "tools",
         "ExtentionChrome/extension",
     ]
-    return [c for c in candidates if (repo / c).exists()]
+    seen: Set[str] = set()
+    out: List[str] = []
+    for c in candidates:
+        if c in seen:
+            continue
+        if (repo / c).exists():
+            seen.add(c)
+            out.append(c)
+    return out
 
 
 def resolve_ts_import(spec: str, from_file: Path) -> Optional[Path]:
     if not spec.startswith("."):
         return None
     base = (from_file.parent / spec).resolve()
-    for ext in (".ts", ".tsx", ".js", ".jsx"):
+    for ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte"):
         p = Path(str(base) + ext)
         if p.exists():
             return p
     if base.is_dir():
-        for ext in (".ts", ".tsx", ".js", ".jsx"):
+        for ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte"):
             p = base / ("index" + ext)
             if p.exists():
                 return p
@@ -443,14 +476,15 @@ def build_import_graph(
         for p in base.rglob("*"):
             if is_ignored(p, ignore_dirs, root=repo, ignore_paths=ignore_paths) or not p.is_file():
                 continue
-            if p.suffix not in {".ts", ".js", ".dart", ".py"}:
+            if p.suffix not in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte", ".dart", ".py"}:
                 continue
 
             rel = relpath_posix(p, repo)
             txt = safe_read_text(p)
-            if p.suffix in {".ts", ".js"}:
+            if p.suffix in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte"}:
                 file_lang[rel] = "ts"
                 specs = [m.group("spec") for m in TS_IMPORT_RE.finditer(txt)]
+                specs.extend(m.group("spec") for m in TS_SIDE_EFFECT_IMPORT_RE.finditer(txt))
                 for s in specs:
                     rp = resolve_ts_import(s, p)
                     if rp is None:
@@ -855,27 +889,32 @@ def architecture_summary_lines(
     top_names = {name.rstrip('/') for name, _desc in top_summary}
     module_names = [name.rstrip('/') for name, _desc in module_summary]
 
-    app_features = [name.split('/')[-1] for name in module_names if name.startswith('app/lib/features/')]
-    app_core_groups = [name.split('/')[-1] for name in module_names if name.startswith('app/lib/core/')]
-    backend_modules = [name.split('/')[-1] for name in module_names if name.startswith('backend/src/modules/')]
+    frontend_prefixes = (
+        'app/lib/features/', 'app/lib/core/', 'src/app/', 'src/pages/', 'src/components/',
+        'src/features/', 'src/routes/', 'src/hooks/', 'src/stores/', 'src/composables/',
+        'frontend/src/', 'client/src/', 'web/src/', 'pages/', 'components/', 'routes/'
+    )
+    app_groups = [name.split('/')[-1] for name in module_names if name.startswith(frontend_prefixes)]
+    backend_groups = [name.split('/')[-1] for name in module_names if name.startswith(('backend/src/modules/', 'server/', 'services/', 'api/'))]
 
     if backend_entry or flutter_entry:
         runtime_parts: List[str] = []
         if backend_entry:
             runtime_parts.append(f"backend runtime enters at `{backend_entry}`")
         if flutter_entry:
-            runtime_parts.append(f"app runtime enters at `{flutter_entry}`")
+            runtime_parts.append(f"app/frontend runtime enters at `{flutter_entry}`")
         lines.append(f"- Runtime entrypoints: {'; '.join(runtime_parts)}")
 
     subsystem_bits: List[str] = []
-    if 'app' in top_names:
-        if app_features:
-            subsystem_bits.append(f"app features: {', '.join(f'`{name}`' for name in app_features[:8])}")
+    frontend_roots = {'app', 'frontend', 'client', 'web'}
+    if top_names & frontend_roots or flutter_entry:
+        if app_groups:
+            subsystem_bits.append(f"frontend groups: {', '.join(f'`{name}`' for name in app_groups[:8])}")
         else:
-            subsystem_bits.append("app/UI layer present")
-    if 'backend' in top_names:
-        if backend_modules:
-            subsystem_bits.append(f"backend modules: {', '.join(f'`{name}`' for name in backend_modules[:8])}")
+            subsystem_bits.append("frontend/app layer present")
+    if 'backend' in top_names or 'server' in top_names or backend_entry:
+        if backend_groups:
+            subsystem_bits.append(f"backend groups: {', '.join(f'`{name}`' for name in backend_groups[:8])}")
         else:
             subsystem_bits.append("backend/service layer present")
     if 'ExtentionChrome' in top_names:
@@ -883,8 +922,9 @@ def architecture_summary_lines(
     if subsystem_bits:
         lines.append(f"- Main subsystems: {'; '.join(subsystem_bits)}")
 
-    if app_core_groups:
-        lines.append(f"- Shared app core groups: {', '.join(f'`{name}`' for name in app_core_groups[:8])}")
+    meaningful_shared = [name for name in app_groups if name in {'core', 'components', 'hooks', 'stores', 'composables'}]
+    if meaningful_shared:
+        lines.append(f"- Shared frontend groups: {', '.join(f'`{name}`' for name in meaningful_shared[:8])}")
 
     if route_flow_hints:
         unique_routes: List[str] = []
@@ -3186,12 +3226,23 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
     manifests = find_manifests(repo, max_depth=4, ignore_dirs=ignore_dirs, ignore_paths=ignore_paths)
 
     backend_entry = None
-    for cand in ("backend/src/main.ts", "src/main.ts", "src/index.ts", "server/index.ts"):
+    for cand in (
+        "backend/src/main.ts", "backend/src/index.ts", "src/main.ts", "src/index.ts",
+        "server/index.ts", "server/main.ts", "api/index.ts", "api/server.ts",
+        "backend/src/main.js", "backend/src/index.js", "server/index.js", "server/main.js",
+    ):
         if (repo / cand).exists():
             backend_entry = cand
             break
     flutter_entry = None
-    for cand in ("app/lib/main.dart", "lib/main.dart"):
+    for cand in (
+        "app/lib/main.dart", "lib/main.dart",
+        "src/main.tsx", "src/main.jsx", "src/App.tsx", "src/App.jsx",
+        "frontend/src/main.tsx", "frontend/src/main.jsx", "frontend/src/App.tsx", "frontend/src/App.jsx",
+        "client/src/main.tsx", "client/src/main.jsx", "client/src/App.tsx", "client/src/App.jsx",
+        "web/src/main.ts", "web/src/main.js", "pages/_app.tsx", "pages/index.tsx",
+        "app/page.tsx", "src/app/page.tsx",
+    ):
         if (repo / cand).exists():
             flutter_entry = cand
             break
