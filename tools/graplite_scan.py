@@ -2655,38 +2655,97 @@ def render_blast_map(
         return False
 
     def build_app_feature_flow_map() -> List[Tuple[str, List[str], List[str], List[str]]]:
-        feature_files = [
+        explicit_feature_files = [
             'app/lib/features/send/send_page.dart',
             'app/lib/features/receive/receive_page.dart',
             'app/lib/features/lan/lan_tab_page.dart',
             'app/lib/features/internet/internet_tab_page.dart',
             'app/lib/features/settings/settings_page.dart',
         ]
+
+        def classify_frontend_dep(dep: str) -> str:
+            lower = dep.lower()
+            if any(token in lower for token in ('/services/', '/api/', '/lib/api/', '/client/', '/gateway/', '/providers/', 'cloud_adapter', 'transfer_service', '/core/transfer/')):
+                return 'service'
+            if any(token in lower for token in ('/stores/', '/store/', '/state/', '/hooks/', '/composables/', '/context/', '/reducers/', '/models/')):
+                return 'state'
+            if any(token in lower for token in ('/components/', '/widgets/', '/ui/', '/theme/', '/styles/', '/layouts/', '/shell/')):
+                return 'ui'
+            if any(token in lower for token in ('/utils/', '/helpers/', '/core/', '/lib/', '/platform/', 'discovery')):
+                return 'core'
+            return 'other'
+
+        def candidate_frontend_files() -> List[str]:
+            candidates: List[str] = []
+            seen: Set[str] = set()
+            for file_path in explicit_feature_files:
+                if file_path in edges and file_path not in seen:
+                    seen.add(file_path)
+                    candidates.append(file_path)
+            preferred_roots = (
+                'src/app/', 'src/pages/', 'src/routes/', 'src/features/', 'src/components/',
+                'src/hooks/', 'src/stores/', 'src/state/', 'src/layouts/', 'frontend/src/',
+                'client/src/', 'web/src/', 'pages/', 'components/', 'routes/'
+            )
+            preferred_suffixes = (
+                '.tsx', '.jsx', '.ts', '.js', '.vue', '.dart'
+            )
+            priority_files: List[Tuple[int, str]] = []
+            for file_path, deps in edges.items():
+                if file_path in seen:
+                    continue
+                lower = file_path.lower()
+                if not lower.endswith(preferred_suffixes):
+                    continue
+                if not lower.startswith(preferred_roots):
+                    continue
+                if any(token in lower for token in ('spec.', 'test.', '.d.ts', '__tests__/', '/node_modules/')):
+                    continue
+                score = 0
+                if any(token in lower for token in ('/pages/', '/routes/', '/app/', '/features/')):
+                    score += 4
+                if any(token in lower for token in ('page.', 'layout.', 'screen.', 'view.', 'tab_')):
+                    score += 4
+                if '/components/' in lower or '/widgets/' in lower:
+                    score += 2
+                if deps:
+                    score += min(len(deps), 4)
+                priority_files.append((-score, file_path))
+            priority_files.sort()
+            for _neg_score, file_path in priority_files[:10]:
+                if file_path in seen:
+                    continue
+                seen.add(file_path)
+                candidates.append(file_path)
+            return candidates[:10]
+
         flow_rows: List[Tuple[str, List[str], List[str], List[str]]] = []
-        for file_path in feature_files:
+        for file_path in candidate_frontend_files():
             deps = sorted(edges.get(file_path, set()))
             if not deps:
                 continue
-            core_links = [
-                dep for dep in deps
-                if dep.startswith('app/lib/core/transfer/')
-                or dep.startswith('app/lib/core/platform/')
-                or dep.startswith('app/lib/core/services/')
-            ]
-            util_links = [
-                dep for dep in deps
-                if dep.startswith('app/lib/core/utils/')
-                or dep.startswith('app/lib/core/widgets/')
-                or dep.startswith('app/lib/core/theme/')
-            ]
-            platform_links = [
-                dep for dep in deps
-                if 'platform' in dep.lower()
-                or 'discovery' in dep.lower()
-                or 'cloud_adapter' in dep.lower()
-                or 'transfer_service' in dep.lower()
-            ]
-            flow_rows.append((file_path, core_links[:8], util_links[:8], platform_links[:8]))
+            service_links: List[str] = []
+            ui_links: List[str] = []
+            state_links: List[str] = []
+            core_links: List[str] = []
+            for dep in deps:
+                bucket = classify_frontend_dep(dep)
+                if bucket == 'service':
+                    service_links.append(dep)
+                elif bucket == 'ui':
+                    ui_links.append(dep)
+                elif bucket == 'state':
+                    state_links.append(dep)
+                elif bucket == 'core':
+                    core_links.append(dep)
+            prioritized_side_effects = service_links[:5] + state_links[:5]
+            supporting_links = ui_links[:5] + core_links[:5]
+            frontend_spine = []
+            for dep in deps:
+                lower = dep.lower()
+                if any(token in lower for token in ('platform', 'discovery', 'cloud_adapter', 'transfer_service', '/api/', '/gateway/', '/stores/', '/state/', '/hooks/', '/layouts/')):
+                    frontend_spine.append(dep)
+            flow_rows.append((file_path, prioritized_side_effects[:8], supporting_links[:8], frontend_spine[:8]))
         return flow_rows
 
     def business_risk_profile(file_path: str, out_degree: int, in_degree: int) -> Tuple[int, List[str]]:
@@ -2953,6 +3012,8 @@ def render_blast_map(
         lines.append("- `backend/`: impacts API/runtime, storage integration, route/gateway behavior")
     if (repo / "app").exists():
         lines.append("- `app/`: impacts UI, flows, transfer behaviors client-side")
+    if any((repo / path).exists() for path in ("src", "frontend", "client", "web", "pages", "components")):
+        lines.append("- frontend surface (`src/`, `pages/`, `components/`, `frontend/`, `client/`, `web/`): impacts routes/pages, shared UI, client state, browser-side API flows")
     if (repo / "ExtentionChrome/extension").exists():
         lines.append("- `ExtentionChrome/extension/`: impacts extension/browser integration")
     lines.append("")
@@ -2989,22 +3050,29 @@ def render_blast_map(
                     seen_files.add(file_path)
                 file_to_steps[file_path].append(step)
 
-    lines.append("## App-side feature impact")
+    lines.append("## Frontend / app-side feature impact")
     app_feature_flow_map = build_app_feature_flow_map()
     if app_feature_flow_map:
         for file_path, core_links, util_links, platform_links in app_feature_flow_map:
             lines.append(f"### If changing `{file_path}`")
             if core_links:
-                lines.append(f"- Core/service links: {', '.join(f'`{item}`' for item in core_links[:8])}")
+                lines.append(f"- Service/state links: {', '.join(f'`{item}`' for item in core_links[:8])}")
             if platform_links:
-                lines.append(f"- Transfer/platform/discovery links: {', '.join(f'`{item}`' for item in platform_links[:8])}")
+                lines.append(f"- Route/state/runtime-adjacent links: {', '.join(f'`{item}`' for item in platform_links[:8])}")
             if util_links:
-                lines.append(f"- UI/util/theme dependencies: {', '.join(f'`{item}`' for item in util_links[:8])}")
+                lines.append(f"- UI/core dependencies: {', '.join(f'`{item}`' for item in util_links[:8])}")
+            lower = file_path.lower()
+            if any(token in lower for token in ('/pages/', '/routes/', '/app/', 'page.', 'layout.')):
+                lines.append("- Likely user-visible surface: route/page/app-shell behavior may shift")
+            elif any(token in lower for token in ('/components/', '/widgets/')):
+                lines.append("- Likely shared UI surface: reused component behavior/props may shift")
+            elif any(token in lower for token in ('/hooks/', '/stores/', '/state/', '/composables/')):
+                lines.append("- Likely client-state surface: derived state, effects, or data wiring may shift")
             app_symbols = scip_symbols_by_file.get(file_path, [])
             if app_symbols:
                 lines.append(f"- Structured symbols in file: {', '.join(f'`{item}`' for item in app_symbols[:6])}")
     else:
-        lines.append("- (No app-side feature flow map detected yet.)")
+        lines.append("- (No frontend/app-side feature flow map detected yet.)")
     lines.append("")
 
     lines.append("## Flow-aware impact map")
