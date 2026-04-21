@@ -1106,6 +1106,7 @@ def render_blast_map(
     def rank_route_symbols(impacted: List[str], chain: List[str]) -> List[str]:
         keywords = extract_route_keywords(chain)
         keyword_set = {kw.lower() for kw in keywords}
+        service_keywords = {kw.lower() for kw in keywords if kw and kw[0].islower()}
         ranked: List[Tuple[int, str]] = []
         seen: Set[str] = set()
         for file_path in impacted:
@@ -1120,19 +1121,22 @@ def render_blast_map(
                 symbol_name = symbol.split('#', 1)[-1]
                 symbol_name = symbol_name.replace('()', '')
                 lower_name = symbol_name.lower()
+                container_name = symbol.split('#', 1)[0].lower() if '#' in symbol else ''
                 is_method = '#' in symbol or '()' in symbol
                 is_field = '#' in symbol and '()' not in symbol
                 is_constant = bool(re.fullmatch(r'[A-Z0-9_]+', symbol_name))
                 is_typeish = any(token in symbol for token in ('TransferMetadata#', 'TransferFileDescriptor#', 'TransferSession#'))
+                is_service_file = file_path.endswith('service.ts')
+                is_provider_file = file_path.endswith('provider.ts')
 
                 if is_method:
                     score += 16
                 elif is_field:
                     score += 3
 
-                if file_path.endswith('provider.ts'):
+                if is_provider_file:
                     score += 6
-                elif file_path.endswith('service.ts'):
+                elif is_service_file:
                     score += 4
 
                 exact_matches = 0
@@ -1142,18 +1146,50 @@ def render_blast_map(
                         exact_matches += 1
                     elif kw in lower_symbol:
                         partial_matches += 1
-                score += exact_matches * 30
+                score += exact_matches * 34
                 score += partial_matches * 10
+
+                if is_service_file and exact_matches:
+                    score += 18
+                if is_provider_file and exact_matches:
+                    score += 12
 
                 if is_constant:
                     score -= 12
                 if is_typeish and not exact_matches:
-                    score -= 8
+                    score -= 10
                 if is_field and not exact_matches:
-                    score -= 6
+                    score -= 8
 
                 if any(term in lower_symbol for term in ('uploadurl', 'downloadurl', 'deletechunk', 'cleanupsession', 'attachreceiver', 'createsession', 'touchsession', 'completesession', 'getsession', 'getcompletionflags')):
-                    score += 6
+                    score += 8
+
+                if is_service_file:
+                    if 'createsession' in service_keywords:
+                        if 'createsession' in lower_symbol:
+                            score += 30
+                        if any(t in lower_symbol for t in ('createsessionresult', 'transfersession', 'pairingcode')):
+                            score += 16
+                        if any(t in lower_symbol for t in ('transfermetadata', 'transferfiledescriptor')):
+                            score += 4
+                    if 'attachreceiver' in service_keywords:
+                        if 'attachreceiver' in lower_symbol:
+                            score += 30
+                        if any(t in lower_symbol for t in ('receiver', 'transfersession', 'pairingcode')):
+                            score += 14
+                        if any(t in lower_symbol for t in ('transfermetadata', 'transferfiledescriptor')):
+                            score -= 2
+                    if 'completesession' in service_keywords:
+                        if 'completesession' in lower_symbol:
+                            score += 28
+                        if any(t in lower_symbol for t in ('getcompletionflags', 'sendercompleted', 'receivercompleted', 'transfersession')):
+                            score += 14
+                    if 'getsession' in service_keywords and ('getsession' in lower_symbol or 'transfersession' in lower_symbol):
+                        score += 12
+                    if 'touchsession' in service_keywords and ('touchsession' in lower_symbol or 'lastactivity' in lower_symbol):
+                        score += 10
+                    if container_name in {'transferservice', 'createsessionresult'}:
+                        score += 6
 
                 if score <= 0 and not is_method:
                     continue
