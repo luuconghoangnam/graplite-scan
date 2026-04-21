@@ -191,6 +191,12 @@ class ScipIndexStatus:
     summary: List[str]
     document_hints: List[str]
     symbol_hints: List[str]
+    tool_name: str
+    tool_version: str
+    project_root: str
+    document_count: int
+    structured_document_hints: List[str]
+    structured_symbol_hints: List[str]
 
 
 def is_ignored(path: Path, ignore_dirs: Set[str]) -> bool:
@@ -774,6 +780,93 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             return None
         return f'{path} :: {symbol}'
 
+    def read_varint(buf: bytes, pos: int) -> Tuple[int, int]:
+        shift = 0
+        value = 0
+        while pos < len(buf):
+            b = buf[pos]
+            pos += 1
+            value |= (b & 0x7F) << shift
+            if not (b & 0x80):
+                return value, pos
+            shift += 7
+        raise ValueError('unexpected EOF while reading varint')
+
+    def read_length_delimited(buf: bytes, pos: int) -> Tuple[bytes, int]:
+        size, pos = read_varint(buf, pos)
+        end = pos + size
+        return buf[pos:end], end
+
+    def iter_fields(buf: bytes) -> Iterable[Tuple[int, int, bytes]]:
+        pos = 0
+        while pos < len(buf):
+            key, pos = read_varint(buf, pos)
+            field_no = key >> 3
+            wire_type = key & 0x7
+            if wire_type == 0:
+                value, pos = read_varint(buf, pos)
+                yield field_no, wire_type, str(value).encode('utf-8')
+            elif wire_type == 2:
+                value, pos = read_length_delimited(buf, pos)
+                yield field_no, wire_type, value
+            elif wire_type == 5:
+                value = buf[pos:pos + 4]
+                pos += 4
+                yield field_no, wire_type, value
+            elif wire_type == 1:
+                value = buf[pos:pos + 8]
+                pos += 8
+                yield field_no, wire_type, value
+            else:
+                raise ValueError(f'unsupported wire type {wire_type}')
+
+    def decode_utf8(value: bytes) -> str:
+        return value.decode('utf-8', errors='replace')
+
+    def parse_metadata(buf: bytes) -> Tuple[str, str, str]:
+        tool_name = ''
+        tool_version = ''
+        project_root = ''
+        for field_no, wire_type, value in iter_fields(buf):
+            if field_no == 2 and wire_type == 2:
+                for nested_no, nested_wire, nested_val in iter_fields(value):
+                    if nested_wire != 2:
+                        continue
+                    if nested_no == 1:
+                        tool_name = decode_utf8(nested_val)
+                    elif nested_no == 2:
+                        tool_version = decode_utf8(nested_val)
+            elif field_no == 3 and wire_type == 2:
+                project_root = decode_utf8(value)
+        return tool_name, tool_version, project_root
+
+    def parse_document(buf: bytes) -> Tuple[str, str, List[str]]:
+        relative_path = ''
+        language = ''
+        symbols: List[str] = []
+        for field_no, wire_type, value in iter_fields(buf):
+            if wire_type != 2:
+                continue
+            if field_no == 1:
+                relative_path = decode_utf8(value)
+            elif field_no == 4:
+                language = decode_utf8(value)
+            elif field_no == 3:
+                symbol_text = ''
+                display_name = ''
+                for nested_no, nested_wire, nested_val in iter_fields(value):
+                    if nested_wire != 2:
+                        continue
+                    if nested_no == 1:
+                        symbol_text = decode_utf8(nested_val)
+                    elif nested_no == 6:
+                        display_name = decode_utf8(nested_val)
+                if display_name:
+                    symbols.append(display_name)
+                elif symbol_text:
+                    symbols.append(symbol_text)
+        return relative_path, language, symbols
+
     index_path = repo / scip_readiness.index_path
     if not scip_readiness.enabled:
         return ScipIndexStatus(
@@ -783,6 +876,12 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             summary=['SCIP not enabled for this repo shape yet'],
             document_hints=[],
             symbol_hints=[],
+            tool_name='',
+            tool_version='',
+            project_root='',
+            document_count=0,
+            structured_document_hints=[],
+            structured_symbol_hints=[],
         )
     if not index_path.exists() or not index_path.is_file():
         return ScipIndexStatus(
@@ -792,6 +891,12 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             summary=['index file not generated yet'],
             document_hints=[],
             symbol_hints=[],
+            tool_name='',
+            tool_version='',
+            project_root='',
+            document_count=0,
+            structured_document_hints=[],
+            structured_symbol_hints=[],
         )
     try:
         stat = index_path.stat()
@@ -799,8 +904,35 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         strings = extract_printable_strings(data[: min(len(data), 1_000_000)])
         document_hints: List[str] = []
         symbol_hints: List[str] = []
+        structured_document_hints: List[str] = []
+        structured_symbol_hints: List[str] = []
         seen_docs: Set[str] = set()
         seen_symbols: Set[str] = set()
+        tool_name = ''
+        tool_version = ''
+        project_root = ''
+        document_count = 0
+
+        for field_no, wire_type, value in iter_fields(data):
+            if field_no == 1 and wire_type == 2 and not tool_name:
+                tool_name, tool_version, project_root = parse_metadata(value)
+            elif field_no == 2 and wire_type == 2:
+                document_count += 1
+                relative_path, language, symbols = parse_document(value)
+                if relative_path:
+                    doc_label = relative_path if not language else f'{relative_path} ({language})'
+                    if doc_label not in seen_docs:
+                        seen_docs.add(doc_label)
+                        structured_document_hints.append(doc_label)
+                for symbol in symbols:
+                    if relative_path and symbol:
+                        symbol_label = f'{relative_path} :: {symbol}'
+                        if symbol_label not in seen_symbols:
+                            seen_symbols.add(symbol_label)
+                            structured_symbol_hints.append(symbol_label)
+
+        seen_docs.clear()
+        seen_symbols.clear()
         for s in strings:
             for m in re.finditer(r'src/[A-Za-z0-9_./\-]+\.ts', s):
                 path = m.group(0)
@@ -815,6 +947,8 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         summary = [
             f'file exists at `{scip_readiness.index_path}`',
             f'size ≈ {stat.st_size} bytes',
+            f'structured documents: {document_count}',
+            f'structured symbols: {len(structured_symbol_hints)}',
             f'printable document hints: {len(document_hints)}',
             f'printable symbol hints: {len(symbol_hints)}',
         ]
@@ -825,6 +959,12 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             summary=summary,
             document_hints=document_hints[:20],
             symbol_hints=symbol_hints[:20],
+            tool_name=tool_name,
+            tool_version=tool_version,
+            project_root=project_root,
+            document_count=document_count,
+            structured_document_hints=structured_document_hints[:20],
+            structured_symbol_hints=structured_symbol_hints[:20],
         )
     except Exception as err:
         return ScipIndexStatus(
@@ -834,6 +974,12 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             summary=[f'failed to inspect index file: {err}'],
             document_hints=[],
             symbol_hints=[],
+            tool_name='',
+            tool_version='',
+            project_root='',
+            document_count=0,
+            structured_document_hints=[],
+            structured_symbol_hints=[],
         )
 
 
@@ -1027,10 +1173,24 @@ def render_fast_map(
         lines.append("- Index status:")
         for item in scip_index_status.summary[:6]:
             lines.append(f"  - {item}")
+    if scip_index_status.tool_name:
+        lines.append(f"- Structured tool: `{scip_index_status.tool_name}` `{scip_index_status.tool_version}`")
+    if scip_index_status.project_root:
+        lines.append(f"- Structured project root: `{scip_index_status.project_root}`")
+    if scip_index_status.document_count:
+        lines.append(f"- Structured document count: `{scip_index_status.document_count}`")
     if scip_readiness.reasons:
         lines.append("- Detection notes:")
         for reason in scip_readiness.reasons[:6]:
             lines.append(f"  - {reason}")
+    if scip_index_status.structured_document_hints:
+        lines.append("- Structured document hints:")
+        for item in scip_index_status.structured_document_hints[:10]:
+            lines.append(f"  - `{item}`")
+    if scip_index_status.structured_symbol_hints:
+        lines.append("- Structured symbol hints:")
+        for item in scip_index_status.structured_symbol_hints[:8]:
+            lines.append(f"  - `{item}`")
     if scip_index_status.document_hints:
         lines.append("- SCIP document hints:")
         for item in scip_index_status.document_hints[:10]:
@@ -1335,9 +1495,15 @@ def render_blast_map(
     lines.append(f"- Expected index path: `{scip_readiness.index_path}`")
     lines.append(f"- Index present now: `{'yes' if scip_index_status.exists else 'no'}`")
     if scip_index_status.summary:
-        for item in scip_index_status.summary[:4]:
+        for item in scip_index_status.summary[:6]:
             lines.append(f"- {item}")
-    if scip_index_status.document_hints:
+    if scip_index_status.tool_name:
+        lines.append(f"- Structured tool: `{scip_index_status.tool_name}` `{scip_index_status.tool_version}`")
+    if scip_index_status.structured_document_hints:
+        lines.append(f"- Structured docs: {', '.join(f'`{x}`' for x in scip_index_status.structured_document_hints[:5])}")
+    if scip_index_status.structured_symbol_hints:
+        lines.append(f"- Structured symbols: {', '.join(f'`{x}`' for x in scip_index_status.structured_symbol_hints[:4])}")
+    elif scip_index_status.document_hints:
         lines.append(f"- Example indexed docs: {', '.join(f'`{x}`' for x in scip_index_status.document_hints[:5])}")
     if scip_index_status.symbol_hints:
         lines.append(f"- Example indexed symbols: {', '.join(f'`{x}`' for x in scip_index_status.symbol_hints[:4])}")
