@@ -1012,14 +1012,14 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             path=scip_readiness.index_path,
             size_bytes=stat.st_size,
             summary=summary,
-            document_hints=document_hints[:20],
-            symbol_hints=symbol_hints[:20],
+            document_hints=document_hints,
+            symbol_hints=symbol_hints,
             tool_name=tool_name,
             tool_version=tool_version,
             project_root=project_root,
             document_count=document_count,
-            structured_document_hints=structured_document_hints[:20],
-            structured_symbol_hints=structured_symbol_hints[:20],
+            structured_document_hints=structured_document_hints,
+            structured_symbol_hints=structured_symbol_hints,
         )
     except Exception as err:
         return ScipIndexStatus(
