@@ -214,8 +214,8 @@ For each benchmark run, review these questions:
   - Why: important ecosystem reference for WPF structure and desktop surface expectations, even if not a small app-shaped benchmark.
 - `lepoco/wpfui`
   - Why: practical WPF/UI-oriented repo that should pressure-test views, controls, resources, and desktop app structure summaries.
-- one additional MVVM-heavy WPF sample repo (to be chosen next)
-  - Why: we still need a smaller app-shaped repo with explicit `ViewModel` / `Command` / `Service` conventions.
+- `CommunityToolkit/MVVM-Samples`
+  - Why: explicit MVVM-heavy WPF sample repo with practical `ViewModel` / command / binding patterns, making it a strong benchmark for command/service/viewmodel inference.
 
 ### Flutter / hybrid
 - `flutter/samples`
@@ -308,9 +308,98 @@ Anti-noise checks:
 - mixed repo complexity should not cause unreadable summary sprawl
 - scanner should not double-count the same surface in redundant wording
 
+## Expected observations — C# desktop
+
+### `dotnet/wpf`
+Expected observations:
+1. `MAP.md` should recognize a desktop/WPF-oriented shape, not try to narrate it like a web app.
+2. Views, controls, application shell, and binding-related surfaces should appear as meaningful desktop layers.
+3. `ARCHITECTURE.mmd` (when generated) should prefer desktop runtime/spine wording over generic backend/frontend wording.
+4. Shared desktop infrastructure should appear when it genuinely influences many UI surfaces.
+5. Output should stay conservative when the repo is framework/ecosystem-heavy and not a single tidy app.
+
+Anti-noise checks:
+- framework/source internals should not be over-sold as if they were app-specific business flows
+- desktop-infrastructure detail should not drown the high-level shape
+
+### `lepoco/wpfui`
+Expected observations:
+1. `MAP.md` should surface a practical WPF/UI app or UI-library shape with strong desktop terminology.
+2. Views, controls, resources, and shared desktop shell surfaces should rank sensibly.
+3. `IMPACT.md` should treat shared controls/resources/shell files as broader-impact surfaces than leaf demo views.
+4. Desktop summaries should feel useful even if the repo has library-ish characteristics.
+5. Output should not regress into “nothing interesting found” just because the repo is not a classic full app.
+
+Anti-noise checks:
+- isolated control implementation details should not outrank broadly shared desktop shell surfaces
+- package/demo scaffolding should not dominate the top story
+
+### `CommunityToolkit/MVVM-Samples`
+Expected observations:
+1. `MAP.md` should detect a strong MVVM desktop shape: `Views`, `ViewModels`, commands/bindings, and app shell surfaces.
+2. XAML command bindings should correlate directionally with likely ViewModel command properties.
+3. `IMPACT.md` should show believable interaction paths when a ViewModel or command-related file changes.
+4. Shared ViewModel or command patterns should outrank one-off UI leaf files when they influence many samples or screens.
+5. Desktop command/service inference should feel notably better here than on a generic WPF repo.
+6. Output should stay concise despite sample diversity.
+
+Anti-noise checks:
+- sample/demo duplication should not cause repetitive summary spam
+- command names should not be treated as meaningful if no supporting viewmodel/binding evidence exists
+
+## Expected observations — Flutter / hybrid
+
+### `flutter/samples`
+Expected observations:
+1. `MAP.md` should recognize app-oriented Flutter structure where present instead of flattening everything into generic Dart files.
+2. Important app entrypoints, screens, features, and shared widgets should appear when scanning app-shaped samples.
+3. Shared widget/theme/core surfaces should rank above incidental helper files when they truly fan out.
+4. `IMPACT.md` should remain practical and not regress because web/desktop support became richer.
+5. Different sample styles should not confuse the scanner into inventing backend/web labels where they do not belong.
+
+Anti-noise checks:
+- package/example clutter should not dominate app-shape summaries
+- low-level Dart utility files should not outrank real app surfaces without evidence
+
+### `imaNNeo/fl_chart`
+Expected observations:
+1. `MAP.md` should recognize library/package shape rather than hallucinating a full application architecture.
+2. Shared chart/widget surfaces should appear as reusable library surfaces.
+3. `IMPACT.md` should treat broadly reused library entry surfaces as meaningful while staying conservative about end-user app impact.
+4. Output wording should make sense for a Flutter package, not just a Flutter app.
+
+Anti-noise checks:
+- scanner should not pretend there are route/page/app-shell concepts if the repo is mainly a package
+- example/demo code should not overshadow the main reusable library surfaces
+
+### `drops`
+Expected observations:
+1. `MAP.md` should continue to surface the repo as a hybrid app/backend codebase with practical feature-level summaries.
+2. Feature pages/tabs, shared widgets, platform/discovery/cloud adapter surfaces, and backend transfer flow should remain visible.
+3. `IMPACT.md` should still feel strongest on `drops`; this remains the regression anchor.
+4. Web/desktop generalization work must not degrade Flutter-specific clarity here.
+5. Shared frontend and backend surfaces should remain concise and believable, not more verbose just because more heuristics exist.
+
+Anti-noise checks:
+- no regression into web-biased terminology for Flutter app surfaces
+- scanner should not over-expand support files or generated artifacts into the main architecture story
+
+## Lightweight benchmark run checklist
+
+For each benchmark repo run:
+1. Run the scanner and save `MAP.md` + `IMPACT.md` into the target repo.
+2. Review output against the repo's expected observations in this document.
+3. Mark misses under one of four buckets:
+   - structure miss
+   - ranking miss
+   - impact miss
+   - noise miss
+4. Fix only the highest-leverage miss first.
+5. Re-run on `graplite-scan` and `drops` before committing.
+6. Commit one thin slice only after the benchmark miss is actually improved.
+
 ## Immediate next benchmark authoring tasks
 
-1. Write expected observations for C# desktop and Flutter candidates
-2. Add a lightweight benchmark run checklist
-3. Start fixing issues based on benchmark misses, not intuition alone
-4. Fill the remaining gap: one additional MVVM-heavy WPF sample repo
+1. Start running the chosen benchmark repos and record first misses
+2. Fix issues based on benchmark misses, not intuition alone
+3. Expand expected observations if a repo reveals a missing category
