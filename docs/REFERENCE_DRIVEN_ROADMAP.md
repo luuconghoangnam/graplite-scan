@@ -317,15 +317,63 @@ Every thin slice should:
 - new support is added by thin slices instead of destabilizing rewrites
 - users trust its top impact stories most of the time
 
+## Optimization backlog (detailed)
+
+### A. Desktop ranking hardening
+1. **Page-local command owner ranking**
+   - Prefer ViewModels whose stem matches the current page/view stem.
+   - Prefer command-property matches that appear in both XAML and the candidate ViewModel.
+   - Down-rank generic command-heavy ViewModels that only match by broad shared command names.
+   - Acceptance: `RelayCommandPage` / `AsyncRelayCommandPage` should rank their page-local ViewModel above unrelated command-heavy samples.
+
+2. **Service ownership confidence weighting**
+   - Prefer service links discovered from matched ViewModel dependencies over loose textual service-name mentions.
+   - Down-rank service pages masquerading as service dependencies when they are only linked by naming coincidence.
+   - Acceptance: desktop service buckets should favor `I*Service.cs` / concrete service implementations over unrelated `*ServicePage.xaml.cs` files.
+
+3. **Resource-driven MVVM hints**
+   - Add lightweight support for `ViewModelLocator`, `StaticResource`, and `ResourceDictionary`-style ViewModel discovery.
+   - Acceptance: desktop repos using resource-based binding should stop looking shell-only.
+
+### B. Sample-corpus presentation quality
+4. **Representative-root ranking v2**
+   - Score sample roots by app-ness, shell-ness, and feature representativeness.
+   - Reduce incidental/demo root domination in `MAP.md` summaries.
+   - Acceptance: top sample roots should look like the real center of gravity of the sample corpus.
+
+5. **Module-group summary confidence**
+   - Distinguish between inferred module groups and fallback representative groups.
+   - Acceptance: summaries stay concise without implying false precision.
+
+### C. Web/backend hardening
+6. **Framework-aware wording layer**
+   - Separate frontend app-shell wording from backend controller/provider wording more explicitly.
+   - Acceptance: backend repos stop inheriting frontend phrasing from generic folder names.
+
+7. **Regression fixtures/checklist**
+   - Add a lightweight repeatable benchmark runner/checklist for `web-next`, `backend-nest`, `desktop-mvvm`, `flutter-samples`, and `drops`.
+   - Acceptance: each thin slice can be checked quickly for regressions before commit.
+
+### D. Substrate / trustworthiness
+8. **Confidence-aware inferred links**
+   - Tag major inferred links as strong / medium / fallback internally, even if not fully exposed in user-facing output yet.
+   - Acceptance: ranking can prefer stronger evidence paths before looser textual hints.
+
+9. **Normalized internal flow objects**
+   - Move desktop/web/backend impact rows toward a clearer internal representation for page/view, owner, linked services, commands, and confidence.
+   - Acceptance: future ranking/presentation changes become easier without repeated ad-hoc logic.
+
 ## Immediate next slice recommendation
 
 Do this next:
-1. add web route-segment chain awareness
+1. tighten desktop page-local command owner ranking
 2. commit
-3. add stronger desktop `ICommand` binding correlation
+3. tighten desktop service ownership ranking
 4. commit
-5. start benchmark repo shortlist and expected observations doc
+5. improve representative-root ranking for sample corpora
 6. commit
+7. add lightweight regression checklist/runner notes
+8. commit
 
 That path gives the highest ratio of:
 - practical value

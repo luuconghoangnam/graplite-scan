@@ -3302,6 +3302,36 @@ def render_blast_map(
                                 bucket.append(candidate)
                             break
 
+            def rerank_desktop_bucket(bucket: List[str], bucket_kind: str, view_stem: str, command_names: Sequence[str], matched_vm_links: Sequence[str]) -> List[str]:
+                canonical_stem = view_stem.lower().replace('page', '').replace('view', '').replace('_', '')
+                matched_vm_set = set(matched_vm_links)
+
+                def score_candidate(candidate: str) -> Tuple[int, int, str]:
+                    lower_candidate = candidate.lower()
+                    candidate_stem = Path(lower_candidate).stem.lower().replace('viewmodel', '').replace('service', '').replace('command', '').replace('page', '').replace('view', '').replace('_', '')
+                    txt_candidate = safe_read_text(repo / candidate)
+                    score = 0
+                    if canonical_stem and canonical_stem == candidate_stem:
+                        score += 8
+                    elif canonical_stem and canonical_stem and canonical_stem in candidate_stem:
+                        score += 4
+                    if bucket_kind == 'command':
+                        if candidate in matched_vm_set:
+                            score += 6
+                        explicit_hits = sum(1 for name in command_names if name and re.search(r'\b' + re.escape(name) + r'\b', txt_candidate))
+                        score += min(explicit_hits, 4) * 3
+                    elif bucket_kind == 'service':
+                        if '/services/' in lower_candidate or lower_candidate.endswith('service.cs'):
+                            score += 5
+                        if '/views/' in lower_candidate and 'servicepage' in lower_candidate:
+                            score -= 4
+                    elif bucket_kind == 'viewmodel':
+                        if '/viewmodels/' in lower_candidate or lower_candidate.endswith('viewmodel.cs'):
+                            score += 4
+                    return (-score, len(candidate), candidate)
+
+                return sorted(dict.fromkeys(bucket), key=score_candidate)
+
             vm_links = [dep for dep in deps if '/ViewModels/' in dep or dep.endswith('ViewModel.cs')]
             service_links = [dep for dep in deps if '/Services/' in dep or dep.endswith('Service.cs')]
             command_links = [dep for dep in deps if '/Commands/' in dep or dep.endswith('Command.cs')]
@@ -3387,6 +3417,9 @@ def render_blast_map(
                 explicit_command_names = list(dict.fromkeys(command_names + interface_command_props + codebehind_commands + vm_command_props))
                 if explicit_command_names:
                     append_files_containing(command_links, explicit_command_names, command_candidate_files)
+            vm_links = rerank_desktop_bucket(vm_links, 'viewmodel', view_stem, command_names, vm_links)
+            service_links = rerank_desktop_bucket(service_links, 'service', view_stem, command_names, vm_links)
+            command_links = rerank_desktop_bucket(command_links, 'command', view_stem, command_names, vm_links)
             score = len(vm_links) * 3 + len(service_links) * 2 + len(command_links) * 2 + len(control_links) + len(consumers)
             if canonical_view.lower().endswith('mainwindow.xaml'):
                 score += 4

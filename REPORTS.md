@@ -98,10 +98,12 @@ Notes:
 - Fixed benchmark miss #8: sample-corpus repos now emit restrained fallback module-group summaries instead of leaving `Module / feature groups` blank
 - Fixed benchmark miss #9: desktop fallback now rebuilds service buckets from matched `ViewModel` code instead of leaving them mostly empty
 - Fixed benchmark miss #10: desktop fallback command links now use explicit command-property evidence instead of broad framework-kind/path-only matching
-- Follow-up note for miss #10: command noise is lower, but ranking still favors some generic command-heavy ViewModels over the page-specific owner
+- Fixed benchmark miss #11: desktop fallback buckets are now re-ranked so page-local ViewModels and real services outrank broader shared matches and `*ServicePage.xaml.cs` naming collisions
+- Follow-up note for miss #11: ranking is materially better, but generic command-heavy ViewModels can still rank too high when broad command names are reused across many samples
 - Next recommended slice:
-  - Tighten command ranking in desktop fallback mode so page-local command owners outrank generic/shared command ViewModels
+  - Tighten command ranking again using stronger page-local vs shared-command penalties for generic ViewModels
   - Improve ranking within fallback module groups so strongest representative roots appear first more consistently
+  - Add a lightweight benchmark regression checklist for the current benchmark set
 
 ## Reference Repo Assessment
 

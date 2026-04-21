@@ -411,7 +411,9 @@ Anti-noise checks:
 - Result after fifth fix: service buckets now surface more believable files such as `IFileService.cs`, `IRedditService.cs`, and platform `FileService.cs` instead of staying mostly empty.
 - Sixth fix applied: desktop command linking now prefers explicit command-property names found in XAML / code-behind / ViewModel text, while framework kinds like `RelayCommand` stay as interaction hints instead of directly pulling command files.
 - Result after sixth fix: command noise is reduced and scores are less inflated, but buckets still over-collect some ViewModels sharing broad command-property patterns.
-- Remaining gap: tighten command ranking/matching so page-specific command owners beat generic command-heavy ViewModels.
+- Seventh fix applied: desktop fallback buckets are now re-ranked per page, preferring page-local stems and explicit command-name hits before broader shared-command matches.
+- Result after seventh fix: page-local owners such as `RelayCommandPageViewModel.cs` and `MessengerPageViewModel.cs` now surface first more reliably, and service buckets favor real services over `*ServicePage.xaml.cs` naming collisions.
+- Remaining gap: generic command-heavy ViewModels can still appear too high when command-property names are globally reused across many sample pages.
 
 ### `flutter-samples`
 - First miss observed: scanner inventories the repo correctly, but architecture summary is too timid for a sample corpus and does not distinguish app-shaped Flutter subprojects from repo-level sample collection shape.
