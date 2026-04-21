@@ -92,9 +92,10 @@ Notes:
 - Fixed benchmark miss #2: sample/multi-app repos with sparse import graphs (`desktop-mvvm`, `flutter-samples`) now get structural fallback impact instead of empty impact sections
 - Fixed benchmark miss #3: backend-dominant package repos like `backend-nest` no longer leak frontend/shared-state wording from generic `/context/` or `/providers/` paths
 - Fixed benchmark miss #4: sample-corpus repos (`desktop-mvvm`, `flutter-samples`) now emit repo-level architecture summaries instead of falling back to “No high-confidence architecture summary detected yet.”
+- Fixed benchmark miss #5: sample-corpus summaries now rank more representative roots first instead of leading with incidental samples
 - Next recommended slice:
-  - Strengthen representative-root ranking for sample-corpus summaries
   - Improve nested `Views` ↔ `ViewModels` correlation across multi-root desktop sample repos
+  - Add restrained module-group summaries for large sample corpora without flooding output
 
 ## Reference Repo Assessment
 

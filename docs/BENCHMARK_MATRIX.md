@@ -411,7 +411,9 @@ Anti-noise checks:
 - Result after fix: `IMPACT.md` now highlights sample-level app surfaces such as `form_app/`, `navigation_and_routing/`, `material_3_demo/`, and `testing_app/`.
 - Second fix applied: architecture summary now counts and names app-shaped Flutter sample roots at repo level.
 - Result after second fix: `MAP.md` now summarizes `flutter-samples` as a Flutter sample corpus with multiple app-shaped roots instead of leaving architecture summary blank.
-- Likely next fix area: rank the most representative sample roots so repo-level summaries mention stronger anchors before incidental samples.
+- Third fix applied: sample-root ranking now prefers representative, app-like, multi-platform roots over incidental or infra-oriented samples.
+- Result after third fix: repo summary now highlights stronger anchors such as `material_3_demo`, `testing_app`, `form_app`, and `navigation_and_routing` before weaker incidental samples.
+- Likely next fix area: add nested module-group summaries for large sample corpora without flooding the output.
 
 ## Lightweight benchmark run checklist
 

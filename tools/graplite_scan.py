@@ -1127,18 +1127,39 @@ def architecture_summary_lines(
     flutter_sample_roots: List[str] = []
     desktop_sample_roots: List[str] = []
     try:
+        flutter_ranked: List[Tuple[int, str]] = []
         for child in sorted(repo.iterdir()):
             if not child.is_dir():
                 continue
             if (child / 'lib').exists():
-                flutter_sample_roots.append(child.name)
+                platform_count = sum(1 for name in ('web', 'android', 'ios', 'macos', 'windows', 'linux') if (child / name).exists())
+                marker_count = sum(1 for name in ('README.md', 'test', 'integration_test', 'example') if (child / name).exists())
+                score = platform_count * 3 + marker_count
+                lower_name = child.name.lower()
+                if any(token in lower_name for token in ('form', 'navigation', 'material', 'gallery', 'app', 'demo')):
+                    score += 3
+                if any(token in lower_name for token in ('analysis_defaults', 'background_isolate_channels')):
+                    score -= 5
+                flutter_ranked.append((score, child.name))
+        flutter_ranked.sort(key=lambda item: (-item[0], item[1]))
+        flutter_sample_roots = [name for _score, name in flutter_ranked]
+
+        desktop_ranked: List[Tuple[int, str]] = []
         samples_dir = repo / 'samples'
         if samples_dir.exists() and samples_dir.is_dir():
             for child in sorted(samples_dir.iterdir()):
                 if not child.is_dir():
                     continue
                 if any((child / marker).exists() for marker in ('Views', 'ViewModels', 'Controls', 'Services', 'App.xaml', 'AppShell.xaml', 'Shell.xaml')):
-                    desktop_sample_roots.append(relpath_posix(child, repo).rstrip('/'))
+                    score = 0
+                    score += sum(1 for marker in ('Views', 'ViewModels', 'Controls', 'Services') if (child / marker).exists())
+                    score += 2 * sum(1 for marker in ('App.xaml', 'AppShell.xaml', 'Shell.xaml') if (child / marker).exists())
+                    lower_rel = relpath_posix(child, repo).lower()
+                    if any(token in lower_rel for token in ('maui', 'wpf', 'uwp', 'xf')):
+                        score += 2
+                    desktop_ranked.append((score, relpath_posix(child, repo).rstrip('/')))
+        desktop_ranked.sort(key=lambda item: (-item[0], item[1]))
+        desktop_sample_roots = [name for _score, name in desktop_ranked]
     except OSError:
         pass
 
