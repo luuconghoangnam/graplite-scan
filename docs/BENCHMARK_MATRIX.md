@@ -409,7 +409,9 @@ Anti-noise checks:
 - Result after fourth fix: desktop output is narrower and less noisy; rows now primarily show concrete `ViewModel` links where that is the strongest evidence.
 - Fifth fix applied: matched `ViewModel` text is now mined for service-type names and command-framework hints, then folded back into desktop fallback service/command buckets.
 - Result after fifth fix: service buckets now surface more believable files such as `IFileService.cs`, `IRedditService.cs`, and platform `FileService.cs` instead of staying mostly empty.
-- Remaining gap: command buckets still lean too much on name/path heuristics and need stronger evidence to avoid pulling unrelated command-adjacent pages.
+- Sixth fix applied: desktop command linking now prefers explicit command-property names found in XAML / code-behind / ViewModel text, while framework kinds like `RelayCommand` stay as interaction hints instead of directly pulling command files.
+- Result after sixth fix: command noise is reduced and scores are less inflated, but buckets still over-collect some ViewModels sharing broad command-property patterns.
+- Remaining gap: tighten command ranking/matching so page-specific command owners beat generic command-heavy ViewModels.
 
 ### `flutter-samples`
 - First miss observed: scanner inventories the repo correctly, but architecture summary is too timid for a sample corpus and does not distinguish app-shaped Flutter subprojects from repo-level sample collection shape.

@@ -97,8 +97,10 @@ Notes:
 - Fixed benchmark miss #7: fallback desktop output now separates `ViewModel` vs service vs command buckets more cleanly instead of duplicating the same file across all three
 - Fixed benchmark miss #8: sample-corpus repos now emit restrained fallback module-group summaries instead of leaving `Module / feature groups` blank
 - Fixed benchmark miss #9: desktop fallback now rebuilds service buckets from matched `ViewModel` code instead of leaving them mostly empty
+- Fixed benchmark miss #10: desktop fallback command links now use explicit command-property evidence instead of broad framework-kind/path-only matching
+- Follow-up note for miss #10: command noise is lower, but ranking still favors some generic command-heavy ViewModels over the page-specific owner
 - Next recommended slice:
-  - Tighten command-bucket evidence in desktop fallback mode to reduce command-adjacent page noise
+  - Tighten command ranking in desktop fallback mode so page-local command owners outrank generic/shared command ViewModels
   - Improve ranking within fallback module groups so strongest representative roots appear first more consistently
 
 ## Reference Repo Assessment
