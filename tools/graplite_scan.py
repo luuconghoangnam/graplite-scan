@@ -1608,7 +1608,8 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
     route_flow_hints = extract_route_flow_hints(repo)
     scip_readiness = detect_scip_readiness(repo)
     scip_index_status = detect_scip_index_status(repo, scip_readiness)
-    scip_symbols_by_file = group_scip_symbols_by_file(scip_index_status.symbol_hints)
+    primary_scip_symbols = scip_index_status.structured_symbol_hints or scip_index_status.symbol_hints
+    scip_symbols_by_file = group_scip_symbols_by_file(primary_scip_symbols)
     top_summary = top_level_summary(repo, ignore_dirs)
     module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
     edge_details = file_dependency_details(edges, ranked_files)
