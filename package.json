@@ -4,7 +4,7 @@
   "private": false,
   "description": "Local/offline project scanner that emits MAP.md and IMPACT.md",
   "bin": {
-    "graplite-scan": "./bin/graplite-scan.js"
+    "graplite-scan": "bin/graplite-scan.js"
   },
   "files": [
     "bin",
