@@ -925,6 +925,37 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         is_definition = bool(symbol_roles & 0x1)
         return normalized, is_definition
 
+    def is_generic_structured_symbol(symbol: str) -> bool:
+        lower = symbol.lower().strip()
+        if not lower:
+            return True
+        generic_exact = {
+            'process', 'console', 'promise', 'string', 'number', 'boolean', 'object',
+            'array', 'map', 'set', 'date', 'error', 'json', 'math', 'buffer'
+        }
+        if lower in generic_exact:
+            return True
+        generic_prefixes = (
+            'node:', 'globalthis#', 'process#', 'console#', 'map#', 'set#', 'array#',
+            'string#', 'number#', 'boolean#', 'object#', 'promise#', 'fastifyreply#',
+            'fastifyrequest#', 'socket#', 'server#'
+        )
+        if lower.startswith(generic_prefixes):
+            return True
+        generic_contains = (
+            'fastifyreply#', 'fastifyrequest#', 'incomingmessage#', 'serverresponse#',
+            '__type', '<', 'typeof '
+        )
+        if any(token in lower for token in generic_contains):
+            return True
+        if symbol.startswith('"') and symbol.endswith('"'):
+            return True
+        if lower.endswith('()') and '#' not in lower and lower in {
+            'parse()', 'stringify()', 'log()', 'warn()', 'error()', 'info()', 'send()'
+        }:
+            return True
+        return False
+
     def parse_document(buf: bytes) -> Tuple[str, str, List[str], List[Tuple[str, bool]]]:
         relative_path = ''
         language = ''
@@ -1073,7 +1104,13 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             key=lambda kv: (kv[1]['refs'], kv[1]['defs'], len(kv[1]['docs']), kv[0]),
             reverse=True,
         )
-        for symbol, symbol_stat in ranked_occurrence_stats[:10]:
+        filtered_occurrence_stats = [
+            (symbol, symbol_stat)
+            for symbol, symbol_stat in ranked_occurrence_stats
+            if not is_generic_structured_symbol(symbol)
+        ]
+        top_occurrence_stats = filtered_occurrence_stats[:10] or ranked_occurrence_stats[:10]
+        for symbol, symbol_stat in top_occurrence_stats:
             structured_top_reference_hints.append(
                 f"{symbol} [refs={symbol_stat['refs']}, defs={symbol_stat['defs']}, docs={len(symbol_stat['docs'])}]"
             )
