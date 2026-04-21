@@ -1336,7 +1336,7 @@ def render_blast_map(
             'createsession', 'touchsession', 'completesession', 'getsession', 'getcompletionflags'
         }
         has_explicit_route_method = bool(service_keywords)
-        ranked: List[Tuple[int, str]] = []
+        ranked: List[Tuple[int, str, int, int, bool, bool, bool, str]] = []
         seen: Set[str] = set()
         for file_path in impacted:
             for symbol in scip_symbols_by_file.get(file_path, []):
@@ -1455,9 +1455,38 @@ def render_blast_map(
 
                 if score <= 0 and not is_method:
                     continue
-                ranked.append((score, label))
+                ranked.append((score, label, exact_matches, partial_matches, is_method, is_provider_file, is_service_file, lower_name))
+
         ranked.sort(key=lambda x: (-x[0], x[1]))
-        return [label for _, label in ranked[:8]]
+
+        pruned: List[str] = []
+        service_fallbacks: List[str] = []
+        for score, label, exact_matches, partial_matches, is_method, is_provider_file, is_service_file, lower_name in ranked:
+            keep = False
+            if exact_matches > 0:
+                keep = True
+            elif partial_matches > 0 and is_method:
+                keep = True
+            elif is_provider_file and any(term in lower_name for term in ('getuploadurl', 'getdownloadurl', 'deletechunk', 'cleanupsession', 'chunkexists')):
+                keep = True
+            elif not has_explicit_route_method:
+                keep = is_method
+
+            if keep:
+                pruned.append(label)
+            elif is_service_file and is_method:
+                service_fallbacks.append(label)
+
+        merged: List[str] = []
+        seen_labels: Set[str] = set()
+        for label in pruned + service_fallbacks:
+            if label in seen_labels:
+                continue
+            seen_labels.add(label)
+            merged.append(label)
+            if len(merged) >= 8:
+                break
+        return merged
     lines: List[str] = []
     lines.append(f"# {blast_name.rsplit('.', 1)[0]} — {repo.name}")
     lines.append("")
