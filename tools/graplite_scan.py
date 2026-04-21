@@ -764,8 +764,12 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         symbol = symbol.replace('`', '')
         symbol = re.sub(r'\([^)]*\)', '()', symbol)
         symbol = symbol.replace('.()', '()')
+        while '()()' in symbol:
+            symbol = symbol.replace('()()', '()')
         symbol = re.sub(r'\.+$', '', symbol)
         symbol = symbol.strip('/ ')
+        if symbol.endswith('#'):
+            return None
         if not symbol or symbol in {'local', 'export'}:
             return None
         return f'{path} :: {symbol}'
