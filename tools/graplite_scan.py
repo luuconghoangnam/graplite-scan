@@ -36,7 +36,7 @@ import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 DEFAULT_IGNORE_DIRS = {
     ".git",
@@ -127,6 +127,8 @@ DIFF_SYMBOL_RES = [
     re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>"),
     re.compile(r"^\s*(?:public\s+|private\s+|protected\s+|static\s+|async\s+|override\s+|readonly\s+|abstract\s+|get\s+|set\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 ]
+DEFAULT_CONFIG_NAME = '.graplite.json'
+
 DIR_RESP_HINTS = {
     'backend': 'server/backend logic',
     'server': 'server/backend logic',
@@ -235,6 +237,29 @@ class ScipIndexStatus:
 
 def is_ignored(path: Path, ignore_dirs: Set[str]) -> bool:
     return any(part in ignore_dirs for part in path.parts)
+
+
+def load_repo_config(repo: Path) -> Dict[str, Any]:
+    config_path = repo / DEFAULT_CONFIG_NAME
+    if not config_path.exists():
+        return {}
+    try:
+        raw = json.loads(config_path.read_text(encoding='utf-8'))
+        if isinstance(raw, dict):
+            return raw
+    except Exception:
+        return {}
+    return {}
+
+
+def config_str(config: Dict[str, Any], key: str, default: str = '') -> str:
+    value = config.get(key, default)
+    return value if isinstance(value, str) else default
+
+
+def config_bool(config: Dict[str, Any], key: str, default: bool = False) -> bool:
+    value = config.get(key, default)
+    return value if isinstance(value, bool) else default
 
 
 def safe_read_text(path: Path, max_bytes: int = 500_000) -> str:
@@ -1770,6 +1795,7 @@ def render_fast_map(
     scip_index_status: ScipIndexStatus,
     fast_name: str,
     blast_name: str,
+    profile: str = 'default',
 ) -> List[str]:
     lines: List[str] = []
     lines.append(f"# {fast_name.rsplit('.', 1)[0]} — {repo.name}")
@@ -1813,19 +1839,21 @@ def render_fast_map(
     lines.append("")
 
     filtered_tree = filter_tree_lines(tree)
+    tree_limit = 280 if profile == 'ai-clean' else 500
     lines.append("## Repo layout (depth≈3, filtered)")
     lines.append("```")
-    lines.extend(filtered_tree[:500])
+    lines.extend(filtered_tree[:tree_limit])
     lines.append("```")
     if len(filtered_tree) < len(tree):
         lines.append(f"- Filtered out ~{len(tree) - len(filtered_tree)} noisy/generated tree entries for readability.")
     lines.append("")
 
-    lines.append("## Key manifests (depth<=4)")
-    lines.append("```")
-    lines.extend(manifests)
-    lines.append("```")
-    lines.append("")
+    if profile != 'ai-clean':
+        lines.append("## Key manifests (depth<=4)")
+        lines.append("```")
+        lines.extend(manifests)
+        lines.append("```")
+        lines.append("")
 
     lines.append("## Run / Build / Test (from package scripts)")
     if scripts_root:
@@ -1974,6 +2002,7 @@ def render_fast_map(
         lines.append("- (No import edges detected in scanned code.)")
     lines.append("")
 
+    symbol_limit = 60 if profile == 'ai-clean' else 120
     lines.append("## Symbol index (definitions + approx mentions)")
     if symbols:
         ranked_syms = sorted(
@@ -1983,7 +2012,7 @@ def render_fast_map(
         )
         lines.append("| kind | name | defined at | approx mentions elsewhere |")
         lines.append("|---|---|---|---:|")
-        for sd in ranked_syms[:120]:
+        for sd in ranked_syms[:symbol_limit]:
             score = symbol_scores.get(f"{sd.lang}:{sd.kind}:{sd.name}:{sd.path}:{sd.line}", 0)
             lines.append(f"| {sd.lang}:{sd.kind} | `{sd.name}` | `{sd.path}:{sd.line}` | {score} |")
     else:
@@ -2802,7 +2831,7 @@ def git_changed_symbol_names(repo: Path, diff_range: str) -> Tuple[Dict[str, Lis
     return cleaned, ''
 
 
-def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_range: str = '') -> Tuple[Path, Path]:
+def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_range: str = '', profile: str = 'default') -> Tuple[Path, Path]:
     ignore_dirs = set(DEFAULT_IGNORE_DIRS)
     scan_subdirs = detect_scan_subdirs(repo)
     tree = list_tree(repo, max_depth=3, ignore_dirs=ignore_dirs)
@@ -2881,6 +2910,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
         scip_index_status=scip_index_status,
         fast_name=fast_name,
         blast_name=blast_name,
+        profile=profile,
     )
     blast_lines = render_blast_map(
         repo=repo,
@@ -2920,29 +2950,42 @@ def main() -> None:
     ap.add_argument("--fast-file", default="", help="Override first output filename")
     ap.add_argument("--blast-file", default="", help="Override second output filename")
     ap.add_argument("--diff-range", default="", help="Optional git diff range, e.g. HEAD~1..HEAD")
+    ap.add_argument("--profile", choices=["default", "ai-clean"], default="", help="Output profile preset")
     args = ap.parse_args()
 
     repo = Path(args.repo).expanduser().resolve()
     if not repo.exists():
         raise SystemExit(f"Repo not found: {repo}")
 
+    repo_config = load_repo_config(repo)
+
     if args.out:
         out_dir = Path(args.out).expanduser().resolve()
     else:
-        out_dir = repo
+        configured_out = config_str(repo_config, 'outDir', '')
+        out_dir = (repo / configured_out).resolve() if configured_out else repo
 
-    if args.mode == "agent-claude":
+    mode = args.mode or config_str(repo_config, 'mode', 'project')
+    profile = args.profile or config_str(repo_config, 'profile', 'default')
+    diff_range = args.diff_range or config_str(repo_config, 'diffRange', '')
+
+    if mode == "agent-claude":
         fast_name = args.fast_file or "AGENT_MAP.md"
         blast_name = args.blast_file or "CLAUDE_MAP.md"
-    elif args.mode == "short":
+    elif mode == "short":
         fast_name = args.fast_file or "MAP.md"
         blast_name = args.blast_file or "IMPACT.md"
     else:
         fast_name = args.fast_file or "PROJECT_FAST_MAP.md"
         blast_name = args.blast_file or "PROJECT_BLAST_RADIUS.md"
 
+    if not args.fast_file:
+        fast_name = config_str(repo_config, 'fastFile', fast_name)
+    if not args.blast_file:
+        blast_name = config_str(repo_config, 'blastFile', blast_name)
+
     out_dir.mkdir(parents=True, exist_ok=True)
-    fast, blast = scan_repo(repo, out_dir, fast_name=fast_name, blast_name=blast_name, diff_range=args.diff_range)
+    fast, blast = scan_repo(repo, out_dir, fast_name=fast_name, blast_name=blast_name, diff_range=diff_range, profile=profile)
     print("OK")
     print("FAST:", fast)
     print("BLAST:", blast)

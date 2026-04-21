@@ -1,0 +1,8 @@
+{
+  "mode": "short",
+  "profile": "ai-clean",
+  "fastFile": "MAP.md",
+  "blastFile": "IMPACT.md",
+  "outDir": "",
+  "diffRange": ""
+}

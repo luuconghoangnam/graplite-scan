@@ -9,11 +9,13 @@ print_help() {
   cat <<'EOF'
 Usage:
   graplite                   # analyze current repo -> MAP.md + IMPACT.md
+  graplite scan              # same as above
   graplite .                 # same as above
   graplite /path/to/repo     # analyze target repo -> MAP.md + IMPACT.md
   graplite analyze [repo]
   graplite project [repo]
   graplite agent [repo]
+  graplite init              # create .graplite.json in current repo
   graplite doctor
   graplite install
   graplite help
@@ -30,7 +32,7 @@ if [[ -z "$FIRST" ]]; then
 fi
 
 case "$FIRST" in
-  analyze)
+  scan|analyze)
     shift || true
     REPO="${1:-.}"
     shift || true
@@ -47,6 +49,10 @@ case "$FIRST" in
     REPO="${1:-.}"
     shift || true
     exec python3 "$ROOT/tools/graplite_scan.py" --repo "$REPO" --mode agent-claude "$@"
+    ;;
+  init)
+    shift || true
+    exec python3 "$ROOT/tools/graplite_init.py" "$@"
     ;;
   doctor)
     shift || true
