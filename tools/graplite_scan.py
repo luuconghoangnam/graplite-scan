@@ -230,6 +230,7 @@ class ScipIndexStatus:
     structured_occurrence_stats: Dict[str, Dict[str, int]]
     structured_symbols_by_file: Dict[str, List[str]]
     structured_occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, int]]]
+    structured_occurrence_lines_by_file: Dict[str, Dict[str, List[int]]]
 
 
 def is_ignored(path: Path, ignore_dirs: Set[str]) -> bool:
@@ -945,11 +946,36 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             return None
         return tail
 
-    def parse_occurrence(buf: bytes) -> Tuple[Optional[str], bool]:
+    def parse_occurrence_range_start_line(value: bytes, wire_type: int) -> Optional[int]:
+        ints: List[int] = []
+        if wire_type == 0:
+            try:
+                ints.append(int(decode_utf8(value)))
+            except ValueError:
+                return None
+        elif wire_type == 2:
+            pos = 0
+            while pos < len(value):
+                try:
+                    item, pos = read_varint(value, pos)
+                except ValueError:
+                    break
+                ints.append(int(item))
+        if not ints:
+            return None
+        start_line = ints[0]
+        if start_line < 0:
+            return None
+        return start_line + 1
+
+    def parse_occurrence(buf: bytes) -> Tuple[Optional[str], bool, Optional[int]]:
         symbol_text = ''
         symbol_roles = 0
+        start_line: Optional[int] = None
         for field_no, wire_type, value in iter_fields(buf):
-            if field_no == 2 and wire_type == 2:
+            if field_no == 1 and wire_type in {0, 2} and start_line is None:
+                start_line = parse_occurrence_range_start_line(value, wire_type)
+            elif field_no == 2 and wire_type == 2:
                 symbol_text = decode_utf8(value)
             elif field_no == 3 and wire_type == 0:
                 try:
@@ -958,7 +984,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                     symbol_roles = 0
         normalized = normalize_structured_symbol(symbol_text, '') if symbol_text else None
         is_definition = bool(symbol_roles & 0x1)
-        return normalized, is_definition
+        return normalized, is_definition, start_line
 
     def is_generic_structured_symbol(symbol: str) -> bool:
         lower = symbol.lower().strip()
@@ -991,11 +1017,11 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             return True
         return False
 
-    def parse_document(buf: bytes) -> Tuple[str, str, List[str], List[Tuple[str, bool]]]:
+    def parse_document(buf: bytes) -> Tuple[str, str, List[str], List[Tuple[str, bool, Optional[int]]]]:
         relative_path = ''
         language = ''
         symbols: List[str] = []
-        occurrences: List[Tuple[str, bool]] = []
+        occurrences: List[Tuple[str, bool, Optional[int]]] = []
         for field_no, wire_type, value in iter_fields(buf):
             if wire_type != 2:
                 continue
@@ -1004,9 +1030,9 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             elif field_no == 4:
                 language = decode_utf8(value)
             elif field_no == 2:
-                normalized_occurrence, is_definition = parse_occurrence(value)
+                normalized_occurrence, is_definition, start_line = parse_occurrence(value)
                 if normalized_occurrence:
-                    occurrences.append((normalized_occurrence, is_definition))
+                    occurrences.append((normalized_occurrence, is_definition, start_line))
             elif field_no == 3:
                 symbol_text = ''
                 display_name = ''
@@ -1045,6 +1071,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             structured_occurrence_stats={},
             structured_symbols_by_file={},
             structured_occurrence_stats_by_file={},
+            structured_occurrence_lines_by_file={},
         )
     if not index_path.exists() or not index_path.is_file():
         return ScipIndexStatus(
@@ -1068,6 +1095,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             structured_occurrence_stats={},
             structured_symbols_by_file={},
             structured_occurrence_stats_by_file={},
+            structured_occurrence_lines_by_file={},
         )
     try:
         file_stat = index_path.stat()
@@ -1092,6 +1120,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         occurrence_stats: Dict[str, Dict[str, Any]] = {}
         symbols_by_file: Dict[str, List[str]] = defaultdict(list)
         occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
+        occurrence_lines_by_file: Dict[str, Dict[str, List[int]]] = defaultdict(dict)
 
         for field_no, wire_type, value in iter_fields(data):
             if field_no == 1 and wire_type == 2 and not tool_name:
@@ -1112,7 +1141,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                             structured_symbol_hints.append(symbol_label)
                         if symbol not in symbols_by_file[relative_path]:
                             symbols_by_file[relative_path].append(symbol)
-                for symbol, is_definition in occurrences:
+                for symbol, is_definition, start_line in occurrences:
                     occurrence_count += 1
                     if is_definition:
                         definition_count += 1
@@ -1131,6 +1160,11 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                             per_file_symbol_stat['defs'] += 1
                         else:
                             per_file_symbol_stat['refs'] += 1
+
+                        if start_line is not None:
+                            symbol_lines = occurrence_lines_by_file[relative_path].setdefault(symbol, [])
+                            if start_line not in symbol_lines:
+                                symbol_lines.append(start_line)
 
                         occ_kind = 'def' if is_definition else 'ref'
                         occ_label = f'{relative_path} :: {symbol} [{occ_kind}]'
@@ -1218,6 +1252,13 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                 }
                 for file_path, file_stats in occurrence_stats_by_file.items()
             },
+            structured_occurrence_lines_by_file={
+                file_path: {
+                    symbol: sorted(lines)
+                    for symbol, lines in file_lines.items()
+                }
+                for file_path, file_lines in occurrence_lines_by_file.items()
+            },
         )
     except Exception as err:
         return ScipIndexStatus(
@@ -1241,6 +1282,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             structured_occurrence_stats={},
             structured_symbols_by_file={},
             structured_occurrence_stats_by_file={},
+            structured_occurrence_lines_by_file={},
         )
 
 
@@ -1304,6 +1346,21 @@ def group_structured_occurrence_stats_by_file(structured_occurrence_stats_by_fil
                 current = grouped[alias].setdefault(symbol, {'refs': 0, 'defs': 0})
                 current['refs'] += int(stats.get('refs', 0))
                 current['defs'] += int(stats.get('defs', 0))
+    return dict(grouped)
+
+
+def group_structured_occurrence_lines_by_file(structured_occurrence_lines_by_file: Dict[str, Dict[str, List[int]]]) -> Dict[str, Dict[str, List[int]]]:
+    grouped: Dict[str, Dict[str, List[int]]] = defaultdict(dict)
+    for file_path, symbol_lines in structured_occurrence_lines_by_file.items():
+        for alias in file_path_aliases(file_path):
+            for symbol, lines in symbol_lines.items():
+                current = grouped[alias].setdefault(symbol, [])
+                for line in lines:
+                    if line not in current:
+                        current.append(int(line))
+    for file_path, symbol_lines in grouped.items():
+        for symbol, lines in symbol_lines.items():
+            symbol_lines[symbol] = sorted(lines)
     return dict(grouped)
 
 
@@ -1396,6 +1453,8 @@ def rank_changed_range_scip_candidates(
     names: List[str],
     scip_symbols_by_file: Dict[str, List[str]],
     scip_occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, int]]],
+    scip_occurrence_lines_by_file: Dict[str, Dict[str, List[int]]],
+    changed_ranges: Optional[List[ChangedLineRange]] = None,
 ) -> List[str]:
     if not names:
         return []
@@ -1403,6 +1462,7 @@ def rank_changed_range_scip_candidates(
     ranked: List[Tuple[int, str]] = []
     seen: Set[str] = set()
     per_file_stats = scip_occurrence_stats_by_file.get(file_path, {})
+    per_file_lines = scip_occurrence_lines_by_file.get(file_path, {})
     for symbol in scip_symbols_by_file.get(file_path, []):
         lower_symbol = symbol.lower()
         score = 0
@@ -1418,6 +1478,29 @@ def rank_changed_range_scip_candidates(
         stats = per_file_stats.get(symbol, {})
         score += min(int(stats.get('refs', 0)), 10)
         score += min(int(stats.get('defs', 0)) * 3, 9)
+        if changed_ranges:
+            occurrence_lines = per_file_lines.get(symbol, [])
+            if occurrence_lines:
+                best_distance: Optional[int] = None
+                for occurrence_line in occurrence_lines[:32]:
+                    for changed_range in changed_ranges:
+                        if changed_range.start <= occurrence_line <= changed_range.end:
+                            distance = 0
+                        elif occurrence_line < changed_range.start:
+                            distance = changed_range.start - occurrence_line
+                        else:
+                            distance = occurrence_line - changed_range.end
+                        if best_distance is None or distance < best_distance:
+                            best_distance = distance
+                if best_distance is not None:
+                    if best_distance == 0:
+                        score += 20
+                    elif best_distance <= 2:
+                        score += 12
+                    elif best_distance <= 5:
+                        score += 7
+                    elif best_distance <= 12:
+                        score += 3
         if score <= 0:
             continue
         if symbol in seen:
@@ -1735,6 +1818,7 @@ def render_blast_map(
     scip_index_status: ScipIndexStatus,
     scip_symbols_by_file: Dict[str, List[str]],
     scip_occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, int]]],
+    scip_occurrence_lines_by_file: Dict[str, Dict[str, List[int]]],
     symbol_defs_by_file: Dict[str, List[SymbolDef]],
     blast_name: str,
     diff_range: str = '',
@@ -2081,6 +2165,8 @@ def render_blast_map(
                     nearest_names_for_alias,
                     scip_symbols_by_file,
                     scip_occurrence_stats_by_file,
+                    scip_occurrence_lines_by_file,
+                    raw_ranges,
                 )
                 for symbol in ranked_range_scip:
                     if symbol not in changed_range_scip_aliases[alias]:
@@ -2206,6 +2292,8 @@ def render_blast_map(
                         [extract_symbol_name_from_label(label) for label in nearest_labels],
                         scip_symbols_by_file,
                         scip_occurrence_stats_by_file,
+                        scip_occurrence_lines_by_file,
+                        raw_ranges,
                     )
                     for route in file_to_routes.get(alias, []):
                         matched_route_scores[route] += 1
@@ -2486,6 +2574,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
     primary_scip_symbols = scip_index_status.structured_symbol_hints or scip_index_status.symbol_hints
     scip_symbols_by_file = group_structured_scip_symbols_by_file(scip_index_status.structured_symbols_by_file) if scip_index_status.structured_symbols_by_file else group_scip_symbols_by_file(primary_scip_symbols)
     scip_occurrence_stats_by_file = group_structured_occurrence_stats_by_file(scip_index_status.structured_occurrence_stats_by_file)
+    scip_occurrence_lines_by_file = group_structured_occurrence_lines_by_file(scip_index_status.structured_occurrence_lines_by_file)
     symbol_defs_by_file = group_symbol_defs_by_file(symbols)
     top_summary = top_level_summary(repo, ignore_dirs)
     module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
@@ -2536,6 +2625,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
         scip_index_status=scip_index_status,
         scip_symbols_by_file=scip_symbols_by_file,
         scip_occurrence_stats_by_file=scip_occurrence_stats_by_file,
+        scip_occurrence_lines_by_file=scip_occurrence_lines_by_file,
         symbol_defs_by_file=symbol_defs_by_file,
         blast_name=blast_name,
         diff_range=diff_range,
