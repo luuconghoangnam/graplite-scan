@@ -913,9 +913,9 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         symbol_text = ''
         symbol_roles = 0
         for field_no, wire_type, value in iter_fields(buf):
-            if field_no == 4 and wire_type == 2:
+            if field_no == 2 and wire_type == 2:
                 symbol_text = decode_utf8(value)
-            elif field_no == 5 and wire_type == 0:
+            elif field_no == 3 and wire_type == 0:
                 try:
                     symbol_roles = int(decode_utf8(value))
                 except ValueError:
