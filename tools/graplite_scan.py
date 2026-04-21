@@ -1105,6 +1105,7 @@ def render_blast_map(
 
     def rank_route_symbols(impacted: List[str], chain: List[str]) -> List[str]:
         keywords = extract_route_keywords(chain)
+        keyword_set = {kw.lower() for kw in keywords}
         ranked: List[Tuple[int, str]] = []
         seen: Set[str] = set()
         for file_path in impacted:
@@ -1113,18 +1114,48 @@ def render_blast_map(
                 if label in seen:
                     continue
                 seen.add(label)
+
                 score = 0
                 lower_symbol = symbol.lower()
-                if '#' in symbol or '()' in symbol:
-                    score += 5
+                symbol_name = symbol.split('#', 1)[-1]
+                symbol_name = symbol_name.replace('()', '')
+                lower_name = symbol_name.lower()
+                is_method = '#' in symbol or '()' in symbol
+                is_field = '#' in symbol and '()' not in symbol
+                is_constant = bool(re.fullmatch(r'[A-Z0-9_]+', symbol_name))
+                is_typeish = any(token in symbol for token in ('TransferMetadata#', 'TransferFileDescriptor#', 'TransferSession#'))
+
+                if is_method:
+                    score += 16
+                elif is_field:
+                    score += 3
+
                 if file_path.endswith('provider.ts'):
-                    score += 2
-                for kw in keywords:
-                    if kw.lower() in lower_symbol:
-                        score += 20
-                if '#' in symbol and any(kw.lower() in lower_symbol for kw in keywords):
-                    score += 8
-                if score <= 0 and ('#' not in symbol and '()' not in symbol):
+                    score += 6
+                elif file_path.endswith('service.ts'):
+                    score += 4
+
+                exact_matches = 0
+                partial_matches = 0
+                for kw in keyword_set:
+                    if kw == lower_name:
+                        exact_matches += 1
+                    elif kw in lower_symbol:
+                        partial_matches += 1
+                score += exact_matches * 30
+                score += partial_matches * 10
+
+                if is_constant:
+                    score -= 12
+                if is_typeish and not exact_matches:
+                    score -= 8
+                if is_field and not exact_matches:
+                    score -= 6
+
+                if any(term in lower_symbol for term in ('uploadurl', 'downloadurl', 'deletechunk', 'cleanupsession', 'attachreceiver', 'createsession', 'touchsession', 'completesession', 'getsession', 'getcompletionflags')):
+                    score += 6
+
+                if score <= 0 and not is_method:
                     continue
                 ranked.append((score, label))
         ranked.sort(key=lambda x: (-x[0], x[1]))
