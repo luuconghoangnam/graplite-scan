@@ -100,11 +100,12 @@ Notes:
 - Fixed benchmark miss #10: desktop fallback command links now use explicit command-property evidence instead of broad framework-kind/path-only matching
 - Fixed benchmark miss #11: desktop fallback buckets are now re-ranked so page-local ViewModels and real services outrank broader shared matches and `*ServicePage.xaml.cs` naming collisions
 - Fixed benchmark miss #12: sample-corpus `Module / feature groups` now respects ranked representative roots, so app-like roots surface before lower-priority technical/core roots
+- Added a lightweight benchmark regression runbook to `docs/BENCHMARK_MATRIX.md` so each future slice has a repeatable pre-commit smoke/check gate
 - Follow-up note for miss #12: representative-root ordering is better, but generic command-heavy ViewModels can still rank too high in some desktop command buckets
 - Next recommended slice:
   - Tighten command ranking again using stronger page-local vs shared-command penalties for generic ViewModels
-  - Add a lightweight benchmark regression checklist for the current benchmark set
   - Start lightweight confidence labels internally for stronger vs fallback links
+  - Add real benchmark repos beyond local fixtures for web/desktop confidence
 
 ## Reference Repo Assessment
 

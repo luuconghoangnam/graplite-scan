@@ -144,6 +144,60 @@ For each benchmark run, review these questions:
 - Is anything present only because the heuristic is path-happy?
 - Is anything obviously important still missing?
 
+## Lightweight regression runbook
+
+Use this after every meaningful heuristic/ranking slice before commit.
+
+### Core smoke set (current)
+1. `graplite-scan/benchmarks/web-next`
+2. `graplite-scan/benchmarks/backend-nest`
+3. `graplite-scan/benchmarks/desktop-mvvm`
+4. `graplite-scan/benchmarks/flutter-samples`
+5. `drops`
+
+### Minimum command set
+Run the changed-target benchmark(s) plus `drops`:
+
+```bash
+python3 tools/graplite_scan.py --repo benchmarks/desktop-mvvm --mode short --inplace
+python3 tools/graplite_scan.py --repo benchmarks/flutter-samples --mode short --inplace
+python3 tools/graplite_scan.py --repo /home/gone/.openclaw/workspace/drops --mode short --inplace
+```
+
+Swap benchmark repos according to the slice you are touching.
+
+### Minimum pass criteria
+- command exits successfully
+- `MAP.md` and `IMPACT.md` are regenerated
+- changed benchmark shows the intended improvement
+- `drops` does not regress obviously
+- temporary `drops` output is reverted before commit
+
+### Slice-specific spot checks
+#### Web slices
+- `MAP.md` still highlights route/app-shell/provider surfaces
+- `IMPACT.md` still makes `layout` / `page` / `provider` changes feel believable
+
+#### Backend slices
+- route/controller/service/provider wording stays backend-native
+- top impact/risk files do not get swamped by framework noise
+
+#### Desktop slices
+- page-local `ViewModel` owners should rank above unrelated generic matches when evidence exists
+- service buckets should prefer real services over `*ServicePage.xaml.cs` naming collisions
+- command buckets should not be inflated by framework-kind-only matches
+
+#### Flutter/sample-corpus slices
+- representative app roots should surface before lower-priority technical/demo roots
+- app structure should not regress into web/backend-biased wording
+
+### Commit gate
+Do **not** commit a slice unless all are true:
+- intended benchmark improved or became more trustworthy
+- no obvious regression on `drops`
+- no half-finished experiment left in `tools/graplite_scan.py`
+- benchmark output changes included in commit are intentional
+
 ---
 
 ## Failure patterns to watch for
