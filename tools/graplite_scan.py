@@ -728,6 +728,114 @@ def nested_module_summary(repo: Path, roots: Sequence[str], ignore_dirs: Set[str
     return out
 
 
+def architecture_summary_lines(
+    repo: Path,
+    top_summary: List[Tuple[str, str]],
+    module_summary: List[Tuple[str, str]],
+    backend_entry: Optional[str],
+    flutter_entry: Optional[str],
+    route_flow_hints: List[RouteFlowHint],
+    gateway_hints: Dict[str, List[str]],
+) -> List[str]:
+    lines: List[str] = []
+
+    top_names = {name.rstrip('/') for name, _desc in top_summary}
+    module_names = [name.rstrip('/') for name, _desc in module_summary]
+
+    app_features = [name.split('/')[-1] for name in module_names if name.startswith('app/lib/features/')]
+    app_core_groups = [name.split('/')[-1] for name in module_names if name.startswith('app/lib/core/')]
+    backend_modules = [name.split('/')[-1] for name in module_names if name.startswith('backend/src/modules/')]
+
+    if backend_entry or flutter_entry:
+        runtime_parts: List[str] = []
+        if backend_entry:
+            runtime_parts.append(f"backend runtime enters at `{backend_entry}`")
+        if flutter_entry:
+            runtime_parts.append(f"app runtime enters at `{flutter_entry}`")
+        lines.append(f"- Runtime entrypoints: {'; '.join(runtime_parts)}")
+
+    subsystem_bits: List[str] = []
+    if 'app' in top_names:
+        if app_features:
+            subsystem_bits.append(f"app features: {', '.join(f'`{name}`' for name in app_features[:8])}")
+        else:
+            subsystem_bits.append("app/UI layer present")
+    if 'backend' in top_names:
+        if backend_modules:
+            subsystem_bits.append(f"backend modules: {', '.join(f'`{name}`' for name in backend_modules[:8])}")
+        else:
+            subsystem_bits.append("backend/service layer present")
+    if 'ExtentionChrome' in top_names:
+        subsystem_bits.append("browser extension surface present")
+    if subsystem_bits:
+        lines.append(f"- Main subsystems: {'; '.join(subsystem_bits)}")
+
+    if app_core_groups:
+        lines.append(f"- Shared app core groups: {', '.join(f'`{name}`' for name in app_core_groups[:8])}")
+
+    if route_flow_hints:
+        unique_routes: List[str] = []
+        seen_routes: Set[str] = set()
+        flow_files: List[str] = []
+        seen_flow_files: Set[str] = set()
+        for hint in route_flow_hints:
+            route_label = f"{hint.method} {hint.path}"
+            if route_label not in seen_routes:
+                seen_routes.add(route_label)
+                unique_routes.append(route_label)
+            for step in hint.chain:
+                for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
+                    file_path = file_match.split(':', 1)[0]
+                    if file_path not in seen_flow_files:
+                        seen_flow_files.add(file_path)
+                        flow_files.append(file_path)
+        lines.append(f"- Detected route/flow coverage: {len(unique_routes)} route paths with chain hints across {len(flow_files)} source files")
+
+    gateway_files = list(gateway_hints.keys())
+    if gateway_files:
+        lines.append(f"- Event/realtime surfaces: {', '.join(f'`{name}`' for name in gateway_files[:6])}")
+
+    if not lines:
+        lines.append("- (No high-confidence architecture summary detected yet.)")
+    return lines
+
+
+def filter_top_summary_items(items: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    hidden_roots = {'.agent/', '.claude/', '.gitnexus/', 'graplite-scan/'}
+    return [item for item in items if item[0] not in hidden_roots]
+
+
+def filter_tree_lines(lines: List[str]) -> List[str]:
+    noisy_contains = (
+        'ephemeral/',
+        '.DS_Store',
+        'index.scip',
+        '.flutter-plugins-dependencies',
+        'analyze_output',
+        'build_log',
+        'final_check.txt',
+        'check.txt',
+        'check2.txt',
+    )
+    hidden_roots = {'.agent/', '.claude/', '.gitnexus/', 'graplite-scan/'}
+    filtered: List[str] = []
+    skip_indent: Optional[int] = None
+    for line in lines:
+        indent = len(line) - len(line.lstrip(' '))
+        stripped = line.strip()
+        if skip_indent is not None:
+            if indent > skip_indent:
+                continue
+            skip_indent = None
+        if stripped in hidden_roots:
+            skip_indent = indent
+            continue
+        if any(marker in stripped for marker in noisy_contains):
+            continue
+        filtered.append(line)
+    return filtered
+
+
 def approx_symbol_scores(symbols: List[SymbolDef], file_lang: Dict[str, str], repo: Path) -> Dict[str, int]:
     counts: Dict[str, int] = {}
     files = list(file_lang.keys())
@@ -1677,8 +1785,22 @@ def render_fast_map(
         lines.append(f"- App entrypoint: `{flutter_entry}`")
     lines.append("")
 
+    lines.append("## System architecture summary")
+    for item in architecture_summary_lines(
+        repo,
+        top_summary,
+        module_summary,
+        backend_entry,
+        flutter_entry,
+        route_flow_hints,
+        gateway_hints,
+    ):
+        lines.append(item)
+    lines.append("")
+
+    visible_top_summary = filter_top_summary_items(top_summary)
     lines.append("## Top-level structure & purpose")
-    for name, desc in top_summary[:30]:
+    for name, desc in visible_top_summary[:30]:
         lines.append(f"- `{name}` — {desc}")
     lines.append("")
 
@@ -1690,10 +1812,13 @@ def render_fast_map(
         lines.append("- (No nested module groups detected.)")
     lines.append("")
 
-    lines.append("## Repo layout (depth≈3)")
+    filtered_tree = filter_tree_lines(tree)
+    lines.append("## Repo layout (depth≈3, filtered)")
     lines.append("```")
-    lines.extend(tree[:700])
+    lines.extend(filtered_tree[:500])
     lines.append("```")
+    if len(filtered_tree) < len(tree):
+        lines.append(f"- Filtered out ~{len(tree) - len(filtered_tree)} noisy/generated tree entries for readability.")
     lines.append("")
 
     lines.append("## Key manifests (depth<=4)")
