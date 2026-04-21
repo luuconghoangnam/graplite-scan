@@ -228,6 +228,8 @@ class ScipIndexStatus:
     structured_occurrence_hints: List[str]
     structured_top_reference_hints: List[str]
     structured_occurrence_stats: Dict[str, Dict[str, int]]
+    structured_symbols_by_file: Dict[str, List[str]]
+    structured_occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, int]]]
 
 
 def is_ignored(path: Path, ignore_dirs: Set[str]) -> bool:
@@ -1041,6 +1043,8 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             structured_occurrence_hints=[],
             structured_top_reference_hints=[],
             structured_occurrence_stats={},
+            structured_symbols_by_file={},
+            structured_occurrence_stats_by_file={},
         )
     if not index_path.exists() or not index_path.is_file():
         return ScipIndexStatus(
@@ -1062,6 +1066,8 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             structured_occurrence_hints=[],
             structured_top_reference_hints=[],
             structured_occurrence_stats={},
+            structured_symbols_by_file={},
+            structured_occurrence_stats_by_file={},
         )
     try:
         file_stat = index_path.stat()
@@ -1084,6 +1090,8 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         structured_top_reference_hints: List[str] = []
         seen_occurrences: Set[str] = set()
         occurrence_stats: Dict[str, Dict[str, Any]] = {}
+        symbols_by_file: Dict[str, List[str]] = defaultdict(list)
+        occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
 
         for field_no, wire_type, value in iter_fields(data):
             if field_no == 1 and wire_type == 2 and not tool_name:
@@ -1102,6 +1110,8 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                         if symbol_label not in seen_symbols:
                             seen_symbols.add(symbol_label)
                             structured_symbol_hints.append(symbol_label)
+                        if symbol not in symbols_by_file[relative_path]:
+                            symbols_by_file[relative_path].append(symbol)
                 for symbol, is_definition in occurrences:
                     occurrence_count += 1
                     if is_definition:
@@ -1115,6 +1125,13 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                         else:
                             symbol_stat['refs'] += 1
                         symbol_stat['docs'].add(relative_path)
+
+                        per_file_symbol_stat = occurrence_stats_by_file[relative_path].setdefault(symbol, {'defs': 0, 'refs': 0})
+                        if is_definition:
+                            per_file_symbol_stat['defs'] += 1
+                        else:
+                            per_file_symbol_stat['refs'] += 1
+
                         occ_kind = 'def' if is_definition else 'ref'
                         occ_label = f'{relative_path} :: {symbol} [{occ_kind}]'
                         if occ_label not in seen_occurrences:
@@ -1187,6 +1204,20 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                 }
                 for symbol, symbol_stat in occurrence_stats.items()
             },
+            structured_symbols_by_file={
+                file_path: symbols[:]
+                for file_path, symbols in symbols_by_file.items()
+            },
+            structured_occurrence_stats_by_file={
+                file_path: {
+                    symbol: {
+                        'refs': int(stats.get('refs', 0)),
+                        'defs': int(stats.get('defs', 0)),
+                    }
+                    for symbol, stats in file_stats.items()
+                }
+                for file_path, file_stats in occurrence_stats_by_file.items()
+            },
         )
     except Exception as err:
         return ScipIndexStatus(
@@ -1208,6 +1239,8 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             structured_occurrence_hints=[],
             structured_top_reference_hints=[],
             structured_occurrence_stats={},
+            structured_symbols_by_file={},
+            structured_occurrence_stats_by_file={},
         )
 
 
@@ -1242,6 +1275,36 @@ def group_scip_symbols_by_file(symbol_hints: List[str]) -> Dict[str, List[str]]:
             kept.append(symbol)
         cleaned[file_path] = kept
     return cleaned
+
+
+def group_structured_scip_symbols_by_file(structured_symbols_by_file: Dict[str, List[str]]) -> Dict[str, List[str]]:
+    grouped: Dict[str, List[str]] = defaultdict(list)
+    for file_path, symbols in structured_symbols_by_file.items():
+        for alias in file_path_aliases(file_path):
+            grouped[alias].extend(symbols)
+
+    cleaned: Dict[str, List[str]] = {}
+    for file_path, symbols in grouped.items():
+        seen: Set[str] = set()
+        kept: List[str] = []
+        for symbol in symbols:
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            kept.append(symbol)
+        cleaned[file_path] = kept
+    return cleaned
+
+
+def group_structured_occurrence_stats_by_file(structured_occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, int]]]) -> Dict[str, Dict[str, Dict[str, int]]]:
+    grouped: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(dict)
+    for file_path, symbol_stats in structured_occurrence_stats_by_file.items():
+        for alias in file_path_aliases(file_path):
+            for symbol, stats in symbol_stats.items():
+                current = grouped[alias].setdefault(symbol, {'refs': 0, 'defs': 0})
+                current['refs'] += int(stats.get('refs', 0))
+                current['defs'] += int(stats.get('defs', 0))
+    return dict(grouped)
 
 
 def group_symbol_defs_by_file(symbols: List[SymbolDef]) -> Dict[str, List[SymbolDef]]:
@@ -1326,6 +1389,43 @@ def match_scip_symbols_for_names(file_path: str, names: List[str], scip_symbols_
                 seen.add(symbol)
                 matched.append(symbol)
     return matched[:8]
+
+
+def rank_changed_range_scip_candidates(
+    file_path: str,
+    names: List[str],
+    scip_symbols_by_file: Dict[str, List[str]],
+    scip_occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, int]]],
+) -> List[str]:
+    if not names:
+        return []
+    lower_names = [name.lower() for name in names if name]
+    ranked: List[Tuple[int, str]] = []
+    seen: Set[str] = set()
+    per_file_stats = scip_occurrence_stats_by_file.get(file_path, {})
+    for symbol in scip_symbols_by_file.get(file_path, []):
+        lower_symbol = symbol.lower()
+        score = 0
+        for name in lower_names:
+            if not name:
+                continue
+            if f'#{name}()' in lower_symbol or lower_symbol.endswith(f'{name}()'):
+                score += 12
+            elif f'#{name}' in lower_symbol:
+                score += 8
+            elif name in lower_symbol:
+                score += 5
+        stats = per_file_stats.get(symbol, {})
+        score += min(int(stats.get('refs', 0)), 10)
+        score += min(int(stats.get('defs', 0)) * 3, 9)
+        if score <= 0:
+            continue
+        if symbol in seen:
+            continue
+        seen.add(symbol)
+        ranked.append((score, symbol))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    return [symbol for _score, symbol in ranked[:8]]
 
 
 def collect_route_boost_reasons(
@@ -1621,6 +1721,7 @@ def render_blast_map(
     scip_readiness: ScipReadiness,
     scip_index_status: ScipIndexStatus,
     scip_symbols_by_file: Dict[str, List[str]],
+    scip_occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, int]]],
     symbol_defs_by_file: Dict[str, List[SymbolDef]],
     blast_name: str,
     diff_range: str = '',
@@ -2069,7 +2170,12 @@ def render_blast_map(
                         normalized_changed_files.append(alias)
                     nearest_labels = nearest_symbol_defs_for_ranges(alias, raw_ranges, symbol_defs_by_file)
                     nearest_names = [extract_symbol_name_from_label(label).lower() for label in nearest_labels]
-                    matched_range_scip_symbols = match_scip_symbols_for_names(alias, [extract_symbol_name_from_label(label) for label in nearest_labels], scip_symbols_by_file)
+                    matched_range_scip_symbols = rank_changed_range_scip_candidates(
+                        alias,
+                        [extract_symbol_name_from_label(label) for label in nearest_labels],
+                        scip_symbols_by_file,
+                        scip_occurrence_stats_by_file,
+                    )
                     for route in file_to_routes.get(alias, []):
                         matched_route_scores[route] += 1
                         route_keywords = {kw.lower() for kw in extract_route_keywords_from_steps(route_to_steps.get(route, []))}
@@ -2342,7 +2448,8 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
     scip_readiness = detect_scip_readiness(repo)
     scip_index_status = detect_scip_index_status(repo, scip_readiness)
     primary_scip_symbols = scip_index_status.structured_symbol_hints or scip_index_status.symbol_hints
-    scip_symbols_by_file = group_scip_symbols_by_file(primary_scip_symbols)
+    scip_symbols_by_file = group_structured_scip_symbols_by_file(scip_index_status.structured_symbols_by_file) if scip_index_status.structured_symbols_by_file else group_scip_symbols_by_file(primary_scip_symbols)
+    scip_occurrence_stats_by_file = group_structured_occurrence_stats_by_file(scip_index_status.structured_occurrence_stats_by_file)
     symbol_defs_by_file = group_symbol_defs_by_file(symbols)
     top_summary = top_level_summary(repo, ignore_dirs)
     module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
@@ -2392,6 +2499,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
         scip_readiness=scip_readiness,
         scip_index_status=scip_index_status,
         scip_symbols_by_file=scip_symbols_by_file,
+        scip_occurrence_stats_by_file=scip_occurrence_stats_by_file,
         symbol_defs_by_file=symbol_defs_by_file,
         blast_name=blast_name,
         diff_range=diff_range,
