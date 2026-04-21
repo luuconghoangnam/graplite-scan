@@ -1455,33 +1455,40 @@ def rank_changed_range_scip_candidates(
     scip_occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, int]]],
     scip_occurrence_lines_by_file: Dict[str, Dict[str, List[int]]],
     changed_ranges: Optional[List[ChangedLineRange]] = None,
-) -> List[str]:
+) -> List[ScipRangeCandidate]:
     if not names:
         return []
     lower_names = [name.lower() for name in names if name]
-    ranked: List[Tuple[int, str]] = []
+    ranked: List[ScipRangeCandidate] = []
     seen: Set[str] = set()
     per_file_stats = scip_occurrence_stats_by_file.get(file_path, {})
     per_file_lines = scip_occurrence_lines_by_file.get(file_path, {})
     for symbol in scip_symbols_by_file.get(file_path, []):
         lower_symbol = symbol.lower()
         score = 0
+        matched_names: List[str] = []
         for name in lower_names:
             if not name:
                 continue
             if f'#{name}()' in lower_symbol or lower_symbol.endswith(f'{name}()'):
                 score += 12
+                if name not in matched_names:
+                    matched_names.append(name)
             elif f'#{name}' in lower_symbol:
                 score += 8
+                if name not in matched_names:
+                    matched_names.append(name)
             elif name in lower_symbol:
                 score += 5
+                if name not in matched_names:
+                    matched_names.append(name)
         stats = per_file_stats.get(symbol, {})
         score += min(int(stats.get('refs', 0)), 10)
         score += min(int(stats.get('defs', 0)) * 3, 9)
+        best_distance: Optional[int] = None
         if changed_ranges:
             occurrence_lines = per_file_lines.get(symbol, [])
             if occurrence_lines:
-                best_distance: Optional[int] = None
                 for occurrence_line in occurrence_lines[:32]:
                     for changed_range in changed_ranges:
                         if changed_range.start <= occurrence_line <= changed_range.end:
@@ -1506,9 +1513,9 @@ def rank_changed_range_scip_candidates(
         if symbol in seen:
             continue
         seen.add(symbol)
-        ranked.append((score, symbol))
-    ranked.sort(key=lambda item: (-item[0], item[1]))
-    return [symbol for _score, symbol in ranked[:8]]
+        ranked.append(ScipRangeCandidate(symbol=symbol, score=score, distance=best_distance, matched_names=matched_names[:]))
+    ranked.sort(key=lambda item: (-item.score, item.distance if item.distance is not None else 10**9, item.symbol))
+    return ranked[:8]
 
 
 def build_changed_range_semantic_context(
@@ -1519,11 +1526,11 @@ def build_changed_range_semantic_context(
     scip_symbols_by_file: Dict[str, List[str]],
     scip_occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, int]]],
     scip_occurrence_lines_by_file: Dict[str, Dict[str, List[int]]],
-) -> Tuple[Set[str], Dict[str, List[str]], Dict[str, List[str]], Dict[str, List[str]]]:
+) -> Tuple[Set[str], Dict[str, List[str]], Dict[str, List[str]], Dict[str, List[ScipRangeCandidate]]]:
     changed_aliases: Set[str] = set()
     changed_name_aliases: Dict[str, List[str]] = defaultdict(list)
     changed_range_name_aliases: Dict[str, List[str]] = defaultdict(list)
-    changed_range_scip_aliases: Dict[str, List[str]] = defaultdict(list)
+    changed_range_scip_aliases: Dict[str, List[ScipRangeCandidate]] = defaultdict(list)
 
     for file_path in changed_files:
         aliases = file_path_aliases(file_path)
@@ -1550,9 +1557,11 @@ def build_changed_range_semantic_context(
                 scip_occurrence_lines_by_file,
                 raw_ranges,
             )
-            for symbol in ranked_range_scip:
-                if symbol not in changed_range_scip_aliases[alias]:
-                    changed_range_scip_aliases[alias].append(symbol)
+            existing_symbols = {item.symbol for item in changed_range_scip_aliases[alias]}
+            for candidate in ranked_range_scip:
+                if candidate.symbol not in existing_symbols:
+                    changed_range_scip_aliases[alias].append(candidate)
+                    existing_symbols.add(candidate.symbol)
 
     return changed_aliases, changed_name_aliases, changed_range_name_aliases, changed_range_scip_aliases
 
@@ -1562,7 +1571,7 @@ def collect_route_boost_reasons(
     changed_aliases: Set[str],
     changed_name_aliases: Dict[str, List[str]],
     changed_range_name_aliases: Dict[str, List[str]],
-    changed_range_scip_aliases: Dict[str, List[str]],
+    changed_range_scip_aliases: Dict[str, List[ScipRangeCandidate]],
     scip_symbols_by_file: Dict[str, List[str]],
 ) -> List[str]:
     impacted_files: List[str] = []
@@ -1589,10 +1598,10 @@ def collect_route_boost_reasons(
         range_scip_candidates = changed_range_scip_aliases.get(impacted_file, [])
         if range_scip_candidates:
             matched_candidate = next(
-                (symbol for symbol in range_scip_candidates if any(keyword in symbol.lower() for keyword in route_keywords)),
+                (candidate for candidate in range_scip_candidates if any(keyword in candidate.symbol.lower() for keyword in route_keywords)),
                 range_scip_candidates[0],
             )
-            text = f"changed range matched SCIP candidate `{impacted_file} :: {matched_candidate}`"
+            text = f"changed range matched SCIP candidate `{impacted_file} :: {matched_candidate.symbol}`"
             if text not in seen:
                 seen.add(text)
                 reasons.append(text)
@@ -2224,8 +2233,8 @@ def render_blast_map(
                         if lower_name in route_keywords:
                             range_symbol_hits += 3
                 range_scip_candidates = changed_range_scip_aliases.get(impacted_file, [])
-                for symbol in range_scip_candidates:
-                    if any(keyword in symbol.lower() for keyword in route_keywords):
+                for candidate in range_scip_candidates:
+                    if any(keyword in candidate.symbol.lower() for keyword in route_keywords):
                         range_symbol_hits += 2
             return (-range_symbol_hits, -symbol_hits, -touched, hint.method, route_label)
 
@@ -2319,29 +2328,33 @@ def render_blast_map(
                         normalized_changed_files.append(alias)
                     nearest_labels = nearest_symbol_defs_for_ranges(alias, (changed_line_ranges or {}).get(file_path, []), symbol_defs_by_file)
                     nearest_names = [extract_symbol_name_from_label(label).lower() for label in nearest_labels]
-                    matched_range_scip_symbols = changed_range_scip_aliases.get(alias, [])
+                    matched_range_scip_candidates = changed_range_scip_aliases.get(alias, [])
                     for route in file_to_routes.get(alias, []):
                         matched_route_scores[route] += 1
                         route_keywords = {kw.lower() for kw in extract_route_keywords_from_steps(route_to_steps.get(route, []))}
                         for nearest_name in nearest_names:
                             if nearest_name and nearest_name in route_keywords:
                                 matched_route_scores[route] += 3
-                        for symbol in matched_range_scip_symbols:
-                            if any(keyword in symbol.lower() for keyword in route_keywords):
+                        for candidate in matched_range_scip_candidates:
+                            if any(keyword in candidate.symbol.lower() for keyword in route_keywords):
                                 matched_route_scores[route] += 2
                     for nearest_label in nearest_labels:
                         full_label = f'{alias} :: {nearest_label}'
                         if full_label not in seen_range_symbol_labels:
                             seen_range_symbol_labels.add(full_label)
                             range_symbol_labels.append(full_label)
-                    for symbol in matched_range_scip_symbols:
-                        full_label = f'{alias} :: {symbol}'
+                    for candidate in matched_range_scip_candidates:
+                        full_label = f'{alias} :: {candidate.symbol}'
                         if full_label not in seen_range_symbol_labels:
                             seen_range_symbol_labels.add(full_label)
                             range_symbol_labels.append(full_label)
                         if full_label not in seen_range_scip_candidate_labels:
                             seen_range_scip_candidate_labels.add(full_label)
-                            range_scip_candidate_labels.append(full_label)
+                            matched_names_suffix = ''
+                            if candidate.matched_names:
+                                matched_names_suffix = f" [matched: {', '.join(candidate.matched_names[:3])}]"
+                            distance_suffix = '' if candidate.distance is None else f" [distance: {candidate.distance}]"
+                            range_scip_candidate_labels.append(full_label + matched_names_suffix + distance_suffix)
                     candidate_symbols = scip_symbols_by_file.get(alias, [])
                     prioritized_symbols = []
                     fallback_symbols = []
