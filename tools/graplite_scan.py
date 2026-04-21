@@ -837,6 +837,29 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         )
 
 
+def group_scip_symbols_by_file(symbol_hints: List[str]) -> Dict[str, List[str]]:
+    grouped: Dict[str, List[str]] = defaultdict(list)
+    for item in symbol_hints:
+        if ' :: ' not in item:
+            continue
+        file_path, symbol = item.split(' :: ', 1)
+        if not symbol:
+            continue
+        grouped[file_path].append(symbol)
+
+    cleaned: Dict[str, List[str]] = {}
+    for file_path, symbols in grouped.items():
+        seen: Set[str] = set()
+        kept: List[str] = []
+        for symbol in symbols:
+            if symbol in seen:
+                continue
+            seen.add(symbol)
+            kept.append(symbol)
+        cleaned[file_path] = kept
+    return cleaned
+
+
 def render_fast_map(
     repo: Path,
     tree: List[str],
@@ -1059,6 +1082,7 @@ def render_blast_map(
     route_flow_hints: List[RouteFlowHint],
     scip_readiness: ScipReadiness,
     scip_index_status: ScipIndexStatus,
+    scip_symbols_by_file: Dict[str, List[str]],
     blast_name: str,
 ) -> List[str]:
     lines: List[str] = []
@@ -1140,6 +1164,9 @@ def render_blast_map(
                     lines.append(f"  - {step}")
             if file_path in gateway_hints:
                 lines.append(f"- Event/message schema hints: {', '.join(f'`{h}`' for h in gateway_hints[file_path][:12])}")
+            scip_symbols = scip_symbols_by_file.get(file_path, [])
+            if scip_symbols:
+                lines.append(f"- SCIP symbols in file: {', '.join(f'`{s}`' for s in scip_symbols[:8])}")
         if not rendered_any:
             lines.append("- (No flow-aware impact map detected yet.)")
     else:
@@ -1234,6 +1261,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
     route_flow_hints = extract_route_flow_hints(repo)
     scip_readiness = detect_scip_readiness(repo)
     scip_index_status = detect_scip_index_status(repo, scip_readiness)
+    scip_symbols_by_file = group_scip_symbols_by_file(scip_index_status.symbol_hints)
     top_summary = top_level_summary(repo, ignore_dirs)
     module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
     edge_details = file_dependency_details(edges, ranked_files)
@@ -1274,6 +1302,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
         route_flow_hints=route_flow_hints,
         scip_readiness=scip_readiness,
         scip_index_status=scip_index_status,
+        scip_symbols_by_file=scip_symbols_by_file,
         blast_name=blast_name,
     )
 
