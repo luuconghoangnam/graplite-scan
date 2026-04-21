@@ -1289,6 +1289,17 @@ def nearest_symbol_defs_for_ranges(
     return [label for _distance, _line, label in ranked[:8]]
 
 
+def extract_symbol_name_from_label(label: str) -> str:
+    core = label.strip()
+    if '::' in core:
+        core = core.split('::', 1)[1].strip()
+    if ':' in core:
+        core = core.split(':', 1)[1]
+    if '@' in core:
+        core = core.split('@', 1)[0]
+    return core.strip()
+
+
 def render_fast_map(
     repo: Path,
     tree: List[str],
@@ -1868,19 +1879,27 @@ def render_blast_map(
     if changed_files:
         changed_aliases: Set[str] = set()
         changed_name_aliases: Dict[str, List[str]] = defaultdict(list)
+        changed_range_name_aliases: Dict[str, List[str]] = defaultdict(list)
         for file_path in changed_files:
             aliases = file_path_aliases(file_path)
             changed_aliases.update(aliases)
+            raw_ranges = (changed_line_ranges or {}).get(file_path, [])
             for alias in aliases:
                 for name in (changed_symbol_names or {}).get(file_path, []):
                     if name not in changed_name_aliases[alias]:
                         changed_name_aliases[alias].append(name)
+                for nearest_label in nearest_symbol_defs_for_ranges(alias, raw_ranges, symbol_defs_by_file):
+                    nearest_name = extract_symbol_name_from_label(nearest_label)
+                    if nearest_name and nearest_name not in changed_range_name_aliases[alias]:
+                        changed_range_name_aliases[alias].append(nearest_name)
 
-        def route_priority_key(hint: RouteFlowHint) -> Tuple[int, int, str, str]:
+        def route_priority_key(hint: RouteFlowHint) -> Tuple[int, int, int, str, str]:
             route_label = f"{hint.method} {hint.path}"
             touched = 0
             symbol_hits = 0
+            range_symbol_hits = 0
             impacted_files: List[str] = []
+            route_keywords = {kw.lower() for kw in extract_route_keywords(hint.chain)}
             for step in hint.chain:
                 for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
                     file_path = file_match.split(':', 1)[0]
@@ -1890,13 +1909,21 @@ def render_blast_map(
                         touched += 1
             for impacted_file in impacted_files:
                 candidate_names = changed_name_aliases.get(impacted_file, [])
-                if not candidate_names:
-                    continue
-                for symbol in scip_symbols_by_file.get(impacted_file, []):
-                    lower_symbol = symbol.lower()
-                    if any(name.lower() in lower_symbol for name in candidate_names):
-                        symbol_hits += 1
-            return (-symbol_hits, -touched, hint.method, route_label)
+                if candidate_names:
+                    for symbol in scip_symbols_by_file.get(impacted_file, []):
+                        lower_symbol = symbol.lower()
+                        if any(name.lower() in lower_symbol for name in candidate_names):
+                            symbol_hits += 1
+                range_names = changed_range_name_aliases.get(impacted_file, [])
+                if range_names:
+                    for name in range_names:
+                        lower_name = name.lower()
+                        if lower_name in route_keywords:
+                            range_symbol_hits += 3
+                        for symbol in scip_symbols_by_file.get(impacted_file, []):
+                            if lower_name in symbol.lower():
+                                range_symbol_hits += 1
+            return (-range_symbol_hits, -symbol_hits, -touched, hint.method, route_label)
 
         prioritized_route_flow_hints = sorted(route_flow_hints, key=route_priority_key)
 
@@ -1962,9 +1989,15 @@ def render_blast_map(
                     if alias not in seen_changed_aliases:
                         seen_changed_aliases.add(alias)
                         normalized_changed_files.append(alias)
+                    nearest_labels = nearest_symbol_defs_for_ranges(alias, raw_ranges, symbol_defs_by_file)
+                    nearest_names = [extract_symbol_name_from_label(label).lower() for label in nearest_labels]
                     for route in file_to_routes.get(alias, []):
                         matched_route_scores[route] += 1
-                    for nearest_label in nearest_symbol_defs_for_ranges(alias, raw_ranges, symbol_defs_by_file):
+                        route_keywords = {kw.lower() for kw in extract_route_keywords(route_to_steps.get(route, []))}
+                        for nearest_name in nearest_names:
+                            if nearest_name and nearest_name in route_keywords:
+                                matched_route_scores[route] += 3
+                    for nearest_label in nearest_labels:
                         full_label = f'{alias} :: {nearest_label}'
                         if full_label not in seen_range_symbol_labels:
                             seen_range_symbol_labels.add(full_label)
