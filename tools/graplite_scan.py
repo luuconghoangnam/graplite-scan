@@ -3328,22 +3328,35 @@ def render_blast_map(
 
             def rerank_desktop_bucket(bucket: List[str], bucket_kind: str, view_stem: str, command_names: Sequence[str], matched_vm_links: Sequence[str]) -> List[str]:
                 canonical_stem = view_stem.lower().replace('page', '').replace('view', '').replace('_', '')
+                normalized_canonical_stem = canonical_stem.replace('command', '') if bucket_kind == 'command' else canonical_stem
                 matched_vm_set = set(matched_vm_links)
 
-                def score_candidate(candidate: str) -> Tuple[int, int, str]:
+                def score_candidate(candidate: str) -> Tuple[int, int, str, int]:
                     lower_candidate = candidate.lower()
                     candidate_stem = Path(lower_candidate).stem.lower().replace('viewmodel', '').replace('service', '').replace('command', '').replace('page', '').replace('view', '').replace('_', '')
                     txt_candidate = safe_read_text(repo / candidate)
                     score = 0
-                    if canonical_stem and canonical_stem == candidate_stem:
-                        score += 8
-                    elif canonical_stem and canonical_stem and canonical_stem in candidate_stem:
+                    exact_stem = bool(normalized_canonical_stem and normalized_canonical_stem == candidate_stem)
+                    partial_stem = bool(normalized_canonical_stem and normalized_canonical_stem in candidate_stem)
+                    if exact_stem:
+                        score += 10
+                    elif partial_stem:
                         score += 4
                     if bucket_kind == 'command':
-                        if candidate in matched_vm_set:
-                            score += 6
                         explicit_hits = sum(1 for name in command_names if name and re.search(r'\b' + re.escape(name) + r'\b', txt_candidate))
-                        score += min(explicit_hits, 4) * 3
+                        if candidate in matched_vm_set:
+                            score += 4
+                        if candidate in matched_vm_set and explicit_hits > 0:
+                            score += 4
+                        elif candidate in matched_vm_set and not exact_stem:
+                            score -= 4
+                        score += min(explicit_hits, 4) * 4
+                        if command_names and explicit_hits == 0:
+                            score -= 4
+                        if partial_stem and not exact_stem and explicit_hits == 0:
+                            score -= 4
+                        if '/viewmodels/' in lower_candidate and not exact_stem and explicit_hits <= 1:
+                            score -= 4
                     elif bucket_kind == 'service':
                         if '/services/' in lower_candidate or lower_candidate.endswith('service.cs'):
                             score += 5
@@ -3352,9 +3365,12 @@ def render_blast_map(
                     elif bucket_kind == 'viewmodel':
                         if '/viewmodels/' in lower_candidate or lower_candidate.endswith('viewmodel.cs'):
                             score += 4
-                    return (-score, len(candidate), candidate)
+                    return (-score, len(candidate), candidate, score)
 
-                return sorted(dict.fromkeys(bucket), key=score_candidate)
+                ranked = sorted(dict.fromkeys(bucket), key=score_candidate)
+                if bucket_kind == 'command':
+                    ranked = [candidate for candidate in ranked if score_candidate(candidate)[3] > 0]
+                return ranked
 
             vm_links = [dep for dep in deps if '/ViewModels/' in dep or dep.endswith('ViewModel.cs')]
             service_links = [dep for dep in deps if '/Services/' in dep or dep.endswith('Service.cs')]
