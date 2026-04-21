@@ -1180,6 +1180,15 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         )
 
 
+def file_path_aliases(file_path: str) -> Set[str]:
+    aliases = {file_path}
+    if file_path.startswith('src/'):
+        aliases.add('backend/' + file_path)
+    elif file_path.startswith('backend/src/'):
+        aliases.add(file_path[len('backend/'):])
+    return aliases
+
+
 def group_scip_symbols_by_file(symbol_hints: List[str]) -> Dict[str, List[str]]:
     grouped: Dict[str, List[str]] = defaultdict(list)
     for item in symbol_hints:
@@ -1188,12 +1197,7 @@ def group_scip_symbols_by_file(symbol_hints: List[str]) -> Dict[str, List[str]]:
         file_path, symbol = item.split(' :: ', 1)
         if not symbol:
             continue
-        aliases = {file_path}
-        if file_path.startswith('src/'):
-            aliases.add('backend/' + file_path)
-        elif file_path.startswith('backend/src/'):
-            aliases.add(file_path[len('backend/'):])
-        for alias in aliases:
+        for alias in file_path_aliases(file_path):
             grouped[alias].append(symbol)
 
     cleaned: Dict[str, List[str]] = {}
@@ -1781,8 +1785,26 @@ def render_blast_map(
     lines.append("")
 
     lines.append("## Route-centric impact")
+    prioritized_route_flow_hints = route_flow_hints[:]
+    if changed_files:
+        changed_aliases: Set[str] = set()
+        for file_path in changed_files:
+            changed_aliases.update(file_path_aliases(file_path))
+
+        def route_priority_key(hint: RouteFlowHint) -> Tuple[int, str, str]:
+            route_label = f"{hint.method} {hint.path}"
+            touched = 0
+            for step in hint.chain:
+                for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
+                    file_path = file_match.split(':', 1)[0]
+                    if file_path in changed_aliases:
+                        touched += 1
+            return (-touched, hint.method, route_label)
+
+        prioritized_route_flow_hints = sorted(route_flow_hints, key=route_priority_key)
+
     if route_flow_hints:
-        for hint in route_flow_hints[:12]:
+        for hint in prioritized_route_flow_hints[:12]:
             lines.append(f"### `{hint.method} {hint.path}`")
             impacted = []
             for step in hint.chain:
@@ -1809,19 +1831,28 @@ def render_blast_map(
         elif changed_files:
             lines.append(f"- Changed files: {', '.join(f'`{x}`' for x in changed_files[:20])}")
             matched_routes: List[str] = []
-            seen_routes: Set[str] = set()
+            matched_route_scores: Dict[str, int] = defaultdict(int)
             changed_symbol_labels: List[str] = []
             seen_symbol_labels: Set[str] = set()
+            normalized_changed_files: List[str] = []
+            seen_changed_aliases: Set[str] = set()
             for file_path in changed_files:
-                for route in file_to_routes.get(file_path, []):
-                    if route not in seen_routes:
-                        seen_routes.add(route)
-                        matched_routes.append(route)
-                for symbol in scip_symbols_by_file.get(file_path, []):
-                    label = f'{file_path} :: {symbol}'
-                    if label not in seen_symbol_labels:
-                        seen_symbol_labels.add(label)
-                        changed_symbol_labels.append(label)
+                aliases = sorted(file_path_aliases(file_path))
+                for alias in aliases:
+                    if alias not in seen_changed_aliases:
+                        seen_changed_aliases.add(alias)
+                        normalized_changed_files.append(alias)
+                    for route in file_to_routes.get(alias, []):
+                        matched_route_scores[route] += 1
+                    for symbol in scip_symbols_by_file.get(alias, []):
+                        label = f'{alias} :: {symbol}'
+                        if label not in seen_symbol_labels:
+                            seen_symbol_labels.add(label)
+                            changed_symbol_labels.append(label)
+            if normalized_changed_files and normalized_changed_files != changed_files:
+                lines.append(f"- Normalized file aliases: {', '.join(f'`{x}`' for x in normalized_changed_files[:20])}")
+            for route, _score in sorted(matched_route_scores.items(), key=lambda kv: (-kv[1], kv[0])):
+                matched_routes.append(route)
             if matched_routes:
                 lines.append(f"- Likely impacted routes: {', '.join(f'`{x}`' for x in matched_routes[:12])}")
             if changed_symbol_labels:
