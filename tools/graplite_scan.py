@@ -1511,6 +1511,52 @@ def rank_changed_range_scip_candidates(
     return [symbol for _score, symbol in ranked[:8]]
 
 
+def build_changed_range_semantic_context(
+    changed_files: List[str],
+    changed_line_ranges: Dict[str, List[ChangedLineRange]],
+    changed_symbol_names: Dict[str, List[str]],
+    symbol_defs_by_file: Dict[str, List[SymbolDef]],
+    scip_symbols_by_file: Dict[str, List[str]],
+    scip_occurrence_stats_by_file: Dict[str, Dict[str, Dict[str, int]]],
+    scip_occurrence_lines_by_file: Dict[str, Dict[str, List[int]]],
+) -> Tuple[Set[str], Dict[str, List[str]], Dict[str, List[str]], Dict[str, List[str]]]:
+    changed_aliases: Set[str] = set()
+    changed_name_aliases: Dict[str, List[str]] = defaultdict(list)
+    changed_range_name_aliases: Dict[str, List[str]] = defaultdict(list)
+    changed_range_scip_aliases: Dict[str, List[str]] = defaultdict(list)
+
+    for file_path in changed_files:
+        aliases = file_path_aliases(file_path)
+        changed_aliases.update(aliases)
+        raw_ranges = changed_line_ranges.get(file_path, [])
+        raw_changed_names = changed_symbol_names.get(file_path, [])
+        for alias in aliases:
+            for name in raw_changed_names:
+                if name not in changed_name_aliases[alias]:
+                    changed_name_aliases[alias].append(name)
+            nearest_labels = nearest_symbol_defs_for_ranges(alias, raw_ranges, symbol_defs_by_file)
+            nearest_names_for_alias: List[str] = []
+            for nearest_label in nearest_labels:
+                nearest_name = extract_symbol_name_from_label(nearest_label)
+                if nearest_name:
+                    nearest_names_for_alias.append(nearest_name)
+                    if nearest_name not in changed_range_name_aliases[alias]:
+                        changed_range_name_aliases[alias].append(nearest_name)
+            ranked_range_scip = rank_changed_range_scip_candidates(
+                alias,
+                nearest_names_for_alias,
+                scip_symbols_by_file,
+                scip_occurrence_stats_by_file,
+                scip_occurrence_lines_by_file,
+                raw_ranges,
+            )
+            for symbol in ranked_range_scip:
+                if symbol not in changed_range_scip_aliases[alias]:
+                    changed_range_scip_aliases[alias].append(symbol)
+
+    return changed_aliases, changed_name_aliases, changed_range_name_aliases, changed_range_scip_aliases
+
+
 def collect_route_boost_reasons(
     hint: RouteFlowHint,
     changed_aliases: Set[str],
@@ -2140,37 +2186,15 @@ def render_blast_map(
     prioritized_route_flow_hints = route_flow_hints[:]
     route_boost_reasons: Dict[str, List[str]] = {}
     if changed_files:
-        changed_aliases: Set[str] = set()
-        changed_name_aliases: Dict[str, List[str]] = defaultdict(list)
-        changed_range_name_aliases: Dict[str, List[str]] = defaultdict(list)
-        changed_range_scip_aliases: Dict[str, List[str]] = defaultdict(list)
-        for file_path in changed_files:
-            aliases = file_path_aliases(file_path)
-            changed_aliases.update(aliases)
-            raw_ranges = (changed_line_ranges or {}).get(file_path, [])
-            for alias in aliases:
-                for name in (changed_symbol_names or {}).get(file_path, []):
-                    if name not in changed_name_aliases[alias]:
-                        changed_name_aliases[alias].append(name)
-                nearest_labels = nearest_symbol_defs_for_ranges(alias, raw_ranges, symbol_defs_by_file)
-                nearest_names_for_alias: List[str] = []
-                for nearest_label in nearest_labels:
-                    nearest_name = extract_symbol_name_from_label(nearest_label)
-                    if nearest_name:
-                        nearest_names_for_alias.append(nearest_name)
-                        if nearest_name not in changed_range_name_aliases[alias]:
-                            changed_range_name_aliases[alias].append(nearest_name)
-                ranked_range_scip = rank_changed_range_scip_candidates(
-                    alias,
-                    nearest_names_for_alias,
-                    scip_symbols_by_file,
-                    scip_occurrence_stats_by_file,
-                    scip_occurrence_lines_by_file,
-                    raw_ranges,
-                )
-                for symbol in ranked_range_scip:
-                    if symbol not in changed_range_scip_aliases[alias]:
-                        changed_range_scip_aliases[alias].append(symbol)
+        changed_aliases, changed_name_aliases, changed_range_name_aliases, changed_range_scip_aliases = build_changed_range_semantic_context(
+            changed_files,
+            changed_line_ranges or {},
+            changed_symbol_names or {},
+            symbol_defs_by_file,
+            scip_symbols_by_file,
+            scip_occurrence_stats_by_file,
+            scip_occurrence_lines_by_file,
+        )
 
         def route_priority_key(hint: RouteFlowHint) -> Tuple[int, int, int, str, str]:
             route_label = f"{hint.method} {hint.path}"
@@ -2273,10 +2297,18 @@ def render_blast_map(
             seen_changed_names: Set[str] = set()
             normalized_changed_files: List[str] = []
             seen_changed_aliases: Set[str] = set()
+            changed_aliases, changed_name_aliases, changed_range_name_aliases, changed_range_scip_aliases = build_changed_range_semantic_context(
+                changed_files,
+                changed_line_ranges or {},
+                changed_symbol_names or {},
+                symbol_defs_by_file,
+                scip_symbols_by_file,
+                scip_occurrence_stats_by_file,
+                scip_occurrence_lines_by_file,
+            )
             for file_path in changed_files:
                 aliases = sorted(file_path_aliases(file_path))
                 raw_changed_names = (changed_symbol_names or {}).get(file_path, [])
-                raw_ranges = (changed_line_ranges or {}).get(file_path, [])
                 for name in raw_changed_names:
                     if name not in seen_changed_names:
                         seen_changed_names.add(name)
@@ -2285,16 +2317,9 @@ def render_blast_map(
                     if alias not in seen_changed_aliases:
                         seen_changed_aliases.add(alias)
                         normalized_changed_files.append(alias)
-                    nearest_labels = nearest_symbol_defs_for_ranges(alias, raw_ranges, symbol_defs_by_file)
+                    nearest_labels = nearest_symbol_defs_for_ranges(alias, (changed_line_ranges or {}).get(file_path, []), symbol_defs_by_file)
                     nearest_names = [extract_symbol_name_from_label(label).lower() for label in nearest_labels]
-                    matched_range_scip_symbols = rank_changed_range_scip_candidates(
-                        alias,
-                        [extract_symbol_name_from_label(label) for label in nearest_labels],
-                        scip_symbols_by_file,
-                        scip_occurrence_stats_by_file,
-                        scip_occurrence_lines_by_file,
-                        raw_ranges,
-                    )
+                    matched_range_scip_symbols = changed_range_scip_aliases.get(alias, [])
                     for route in file_to_routes.get(alias, []):
                         matched_route_scores[route] += 1
                         route_keywords = {kw.lower() for kw in extract_route_keywords_from_steps(route_to_steps.get(route, []))}
