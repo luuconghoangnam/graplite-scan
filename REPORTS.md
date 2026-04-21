@@ -95,9 +95,10 @@ Notes:
 - Fixed benchmark miss #5: sample-corpus summaries now rank more representative roots first instead of leading with incidental samples
 - Fixed benchmark miss #6: multi-root desktop sample repos now correlate page views to concrete `ViewModel` files instead of staying shell-only
 - Fixed benchmark miss #7: fallback desktop output now separates `ViewModel` vs service vs command buckets more cleanly instead of duplicating the same file across all three
+- Fixed benchmark miss #8: sample-corpus repos now emit restrained fallback module-group summaries instead of leaving `Module / feature groups` blank
 - Next recommended slice:
   - Rebuild desktop service/command buckets from matched ViewModel code with stronger evidence
-  - Add restrained module-group summaries for large sample corpora without flooding output
+  - Improve ranking within fallback module groups so strongest representative roots appear first more consistently
 
 ## Reference Repo Assessment
 

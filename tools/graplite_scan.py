@@ -2727,7 +2727,43 @@ def render_fast_map(
         for name, desc in module_summary[:80]:
             lines.append(f"- `{name}` — {desc}")
     else:
-        lines.append("- (No nested module groups detected.)")
+        flutter_sample_groups: List[Tuple[str, str]] = []
+        desktop_sample_groups: List[Tuple[str, str]] = []
+        try:
+            for child in sorted(repo.iterdir()):
+                if not child.is_dir():
+                    continue
+                if (child / 'lib').exists():
+                    desc = 'Flutter app/sample root'
+                    if any((child / name).exists() for name in ('web', 'android', 'ios', 'macos', 'windows', 'linux')):
+                        desc = 'Flutter app/sample root with multi-platform surfaces'
+                    flutter_sample_groups.append((child.name + '/', desc))
+            samples_dir = repo / 'samples'
+            if samples_dir.exists() and samples_dir.is_dir():
+                for child in sorted(samples_dir.iterdir()):
+                    if not child.is_dir():
+                        continue
+                    markers = [name for name in ('Views', 'ViewModels', 'Controls', 'Services', 'App.xaml', 'AppShell.xaml', 'Shell.xaml') if (child / name).exists()]
+                    if markers:
+                        desktop_sample_groups.append((relpath_posix(child, repo).rstrip('/') + '/', 'desktop sample root with MVVM/shell surfaces'))
+        except OSError:
+            pass
+
+        if flutter_sample_groups:
+            ranked = sorted(
+                flutter_sample_groups,
+                key=lambda item: (
+                    0 if any(token in item[0].lower() for token in ('material', 'testing', 'form', 'navigation', 'gallery', 'demo')) else 1,
+                    item[0],
+                )
+            )
+            for name, desc in ranked[:6]:
+                lines.append(f"- `{name}` — {desc}")
+        elif desktop_sample_groups:
+            for name, desc in desktop_sample_groups[:6]:
+                lines.append(f"- `{name}` — {desc}")
+        else:
+            lines.append("- (No nested module groups detected.)")
     lines.append("")
 
     filtered_tree = filter_tree_lines(tree)

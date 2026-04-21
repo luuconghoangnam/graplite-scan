@@ -417,7 +417,9 @@ Anti-noise checks:
 - Result after second fix: `MAP.md` now summarizes `flutter-samples` as a Flutter sample corpus with multiple app-shaped roots instead of leaving architecture summary blank.
 - Third fix applied: sample-root ranking now prefers representative, app-like, multi-platform roots over incidental or infra-oriented samples.
 - Result after third fix: repo summary now highlights stronger anchors such as `material_3_demo`, `testing_app`, `form_app`, and `navigation_and_routing` before weaker incidental samples.
-- Likely next fix area: add nested module-group summaries for large sample corpora without flooding the output.
+- Fourth fix applied: when nested module detection stays empty on sample corpora, `MAP.md` now emits restrained sample-root groups instead of leaving the section blank.
+- Result after fourth fix: `flutter-samples` and `desktop-mvvm` now expose a short, useful module-group section without flooding the output with every sample subtree.
+- Likely next fix area: improve ranking within fallback module groups so the most representative app roots appear first more consistently.
 
 ## Lightweight benchmark run checklist
 
