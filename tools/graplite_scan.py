@@ -114,12 +114,28 @@ XAML_DATACONTEXT_RE = re.compile(
     r'\bDataContext\s*=\s*["\']\{Binding\s+(?P<name>[A-Za-z_][A-Za-z0-9_\.]*)',
     re.I,
 )
+XAML_VM_TYPE_RE = re.compile(
+    r'<(?P<prefix>[A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b',
+    re.I,
+)
 CS_NEW_RE = re.compile(
     r'\bnew\s+(?P<name>[A-Z][A-Za-z0-9_]*)\s*\(',
     re.M,
 )
 CS_COMMAND_PROP_RE = re.compile(
     r'\b(?P<name>[A-Za-z_][A-Za-z0-9_]*Command)\b',
+    re.M,
+)
+CS_RELAY_COMMAND_RE = re.compile(
+    r'\b(?:RelayCommand|DelegateCommand|AsyncRelayCommand|ReactiveCommand)\s*(?:<[^>]+>)?\s*\(',
+    re.M,
+)
+CS_CTOR_INJECT_RE = re.compile(
+    r'\b(?:public|internal)\s+[A-Z][A-Za-z0-9_]*\s*\((?P<args>[^\)]*)\)',
+    re.M,
+)
+CS_CTOR_ARG_TYPE_RE = re.compile(
+    r'(?:^|,)\s*(?:I[A-Z][A-Za-z0-9_]*|[A-Z][A-Za-z0-9_]*)\s+(?P<name>[a-z_][A-Za-z0-9_]*)',
     re.M,
 )
 
@@ -1034,10 +1050,12 @@ def detect_frontend_entry(repo: Path) -> Optional[str]:
         "frontend/src/main.tsx", "frontend/src/main.jsx", "frontend/src/main.ts", "frontend/src/main.js",
         "client/src/main.tsx", "client/src/main.jsx", "client/src/main.ts", "client/src/main.js",
         "web/src/main.ts", "web/src/main.js", "web/src/main.tsx", "web/src/main.jsx",
+        "src/app/layout.tsx", "src/app/layout.jsx", "app/layout.tsx", "app/layout.jsx",
         "pages/_app.tsx", "pages/_app.jsx", "pages/index.tsx", "pages/index.jsx",
         "app/page.tsx", "app/page.jsx", "src/app/page.tsx", "src/app/page.jsx",
         "src/App.tsx", "src/App.jsx", "frontend/src/App.tsx", "frontend/src/App.jsx",
         "client/src/App.tsx", "client/src/App.jsx", "web/src/App.tsx", "web/src/App.jsx",
+        "src/providers.tsx", "src/providers.jsx", "app/providers.tsx", "app/providers.jsx",
         "App.xaml", "MainWindow.xaml",
     )
     for cand in priority_candidates:
@@ -1052,8 +1070,9 @@ def detect_frontend_entry(repo: Path) -> Optional[str]:
         if not base.exists() or not base.is_dir():
             continue
         for name in (
-            "page.tsx", "page.jsx", "layout.tsx", "layout.jsx",
-            "index.tsx", "index.jsx", "main.tsx", "main.jsx", "main.ts", "main.js",
+            "page.tsx", "page.jsx", "layout.tsx", "layout.jsx", "template.tsx", "template.jsx",
+            "loading.tsx", "loading.jsx", "error.tsx", "error.jsx", "not-found.tsx", "not-found.jsx",
+            "providers.tsx", "providers.jsx", "index.tsx", "index.jsx", "main.tsx", "main.jsx", "main.ts", "main.js",
             "App.tsx", "App.jsx", "app.tsx", "app.jsx",
         ):
             matches = sorted(base.rglob(name))
@@ -1290,8 +1309,12 @@ def render_architecture_mermaid(
             'hooks': (4, 'hooks / state'),
             'stores': (4, 'state store'),
             'state': (4, 'state store'),
+            'context': (4, 'state context'),
+            'reducers': (4, 'state reducers'),
+            'providers': (5, 'app providers'),
             'composables': (4, 'vue composables'),
             'layouts': (5, 'app shell / layouts'),
+            'shell': (5, 'app shell / layouts'),
             'core': (5, 'shared client core'),
             'lib': (5, 'shared client library'),
         }
@@ -1301,9 +1324,9 @@ def render_architecture_mermaid(
             return (1, shorten_label(base or normalized.split('/')[-1], 24))
         if any(part in {'components', 'widgets'} for part in parts):
             return (3, shorten_label(base or normalized.split('/')[-1], 24))
-        if any(part in {'hooks', 'stores', 'state', 'composables'} for part in parts):
+        if any(part in {'hooks', 'stores', 'state', 'composables', 'context', 'reducers'} for part in parts):
             return (4, shorten_label(base or normalized.split('/')[-1], 24))
-        if any(part in {'layouts', 'core', 'lib'} for part in parts):
+        if any(part in {'layouts', 'core', 'lib', 'providers', 'shell'} for part in parts):
             return (5, shorten_label(base or normalized.split('/')[-1], 24))
         return (6, shorten_label(base or normalized.split('/')[-1], 24))
 
@@ -2878,9 +2901,9 @@ def render_blast_map(
 
         def classify_frontend_dep(dep: str) -> str:
             lower = dep.lower()
-            if any(token in lower for token in ('/services/', '/api/', '/lib/api/', '/client/', '/gateway/', '/providers/', 'cloud_adapter', 'transfer_service', '/core/transfer/')):
+            if any(token in lower for token in ('/services/', '/api/', '/lib/api/', '/client/', '/gateway/', 'cloud_adapter', 'transfer_service', '/core/transfer/')):
                 return 'service'
-            if any(token in lower for token in ('/stores/', '/store/', '/state/', '/hooks/', '/composables/', '/context/', '/reducers/', '/models/')):
+            if any(token in lower for token in ('/stores/', '/store/', '/state/', '/hooks/', '/composables/', '/context/', '/reducers/', '/models/', '/providers/')):
                 return 'state'
             if any(token in lower for token in ('/components/', '/widgets/', '/ui/', '/theme/', '/styles/', '/layouts/', '/shell/')):
                 return 'ui'
@@ -2917,7 +2940,7 @@ def render_blast_map(
                 score = 0
                 if any(token in lower for token in ('/pages/', '/routes/', '/app/', '/features/')):
                     score += 4
-                if any(token in lower for token in ('page.', 'layout.', 'screen.', 'view.', 'tab_')):
+                if any(token in lower for token in ('page.', 'layout.', 'template.', 'loading.', 'error.', 'screen.', 'view.', 'tab_')):
                     score += 4
                 if '/components/' in lower or '/widgets/' in lower:
                     score += 2
@@ -2956,7 +2979,7 @@ def render_blast_map(
             frontend_spine = []
             for dep in deps:
                 lower = dep.lower()
-                if any(token in lower for token in ('platform', 'discovery', 'cloud_adapter', 'transfer_service', '/api/', '/gateway/', '/stores/', '/state/', '/hooks/', '/layouts/')):
+                if any(token in lower for token in ('platform', 'discovery', 'cloud_adapter', 'transfer_service', '/api/', '/gateway/', '/stores/', '/state/', '/hooks/', '/layouts/', '/providers/', '/context/', '/reducers/', '/shell/')):
                     frontend_spine.append(dep)
             flow_rows.append((file_path, prioritized_side_effects[:8], supporting_links[:8], frontend_spine[:8]))
         return flow_rows
@@ -2974,20 +2997,21 @@ def render_blast_map(
                 continue
             is_shared_surface = any(token in lower for token in (
                 '/components/', '/widgets/', '/layouts/', '/hooks/', '/stores/', '/state/',
-                '/composables/', '/context/', '/reducers/', '/core/widgets/', '/core/theme/'
+                '/composables/', '/context/', '/reducers/', '/providers/', '/shell/',
+                '/core/widgets/', '/core/theme/'
             ))
             if not is_shared_surface:
                 continue
             consumers = sorted(reverse_edges.get(file_path, []))
             if not consumers:
                 continue
-            page_consumers = [c for c in consumers if any(token in c.lower() for token in ('/pages/', '/routes/', '/app/', '/features/', 'page.', 'layout.', 'screen.', 'view.'))]
-            state_consumers = [c for c in consumers if any(token in c.lower() for token in ('/hooks/', '/stores/', '/state/', '/composables/', '/context/', '/reducers/'))]
+            page_consumers = [c for c in consumers if any(token in c.lower() for token in ('/pages/', '/routes/', '/app/', '/features/', 'page.', 'layout.', 'template.', 'loading.', 'error.', 'screen.', 'view.'))]
+            state_consumers = [c for c in consumers if any(token in c.lower() for token in ('/hooks/', '/stores/', '/state/', '/composables/', '/context/', '/reducers/', '/providers/'))]
             component_consumers = [c for c in consumers if any(token in c.lower() for token in ('/components/', '/widgets/'))]
             score = len(consumers) + (len(page_consumers) * 2) + len(state_consumers)
-            if '/layouts/' in lower or 'layout.' in lower:
+            if '/layouts/' in lower or '/providers/' in lower or '/shell/' in lower or any(token in lower for token in ('layout.', 'template.', 'loading.', 'error.')):
                 score += 3
-            if '/stores/' in lower or '/state/' in lower or '/hooks/' in lower:
+            if '/stores/' in lower or '/state/' in lower or '/hooks/' in lower or '/context/' in lower or '/reducers/' in lower:
                 score += 2
             candidates.append((score, file_path, page_consumers[:6], state_consumers[:6], component_consumers[:6]))
             seen.add(file_path)
@@ -3009,25 +3033,32 @@ def render_blast_map(
             txt = safe_read_text(repo / canonical_view)
             deps = sorted(edges.get(canonical_view, set()) | edges.get(canonical_view + '.cs', set()))
             consumers = sorted(reverse_edges.get(canonical_view, []) + reverse_edges.get(canonical_view + '.cs', []))
+            all_candidates = set(edges.keys()) | set(reverse_edges.keys())
+
+            def append_matches(bucket: List[str], names: Iterable[str], hints: Sequence[str]) -> None:
+                for raw_name in names:
+                    name = raw_name.split('.')[-1].lower().replace('model', 'viewmodel')
+                    if not name:
+                        continue
+                    for candidate in all_candidates:
+                        lower_candidate = candidate.lower()
+                        if not lower_candidate.endswith('.cs'):
+                            continue
+                        if any(hint in lower_candidate for hint in hints) or name in lower_candidate:
+                            if candidate not in bucket:
+                                bucket.append(candidate)
+
             vm_links = [dep for dep in deps if '/ViewModels/' in dep or dep.endswith('ViewModel.cs')]
             service_links = [dep for dep in deps if '/Services/' in dep or dep.endswith('Service.cs')]
             command_links = [dep for dep in deps if '/Commands/' in dep or dep.endswith('Command.cs')]
             control_links = [dep for dep in deps if '/Controls/' in dep or dep.endswith('.xaml') and '/Views/' not in dep]
-            for m in XAML_DATACONTEXT_RE.finditer(txt):
-                name = m.group('name').split('.')[-1]
-                for candidate in set(edges.keys()) | set(reverse_edges.keys()):
-                    if candidate.lower().endswith('.cs') and name.lower() in candidate.lower() and candidate not in vm_links:
-                        vm_links.append(candidate)
-            for m in XAML_COMMAND_RE.finditer(txt):
-                name = m.group('name').lower()
-                for candidate in set(edges.keys()) | set(reverse_edges.keys()):
-                    lower_candidate = candidate.lower()
-                    if lower_candidate.endswith('.cs') and (name in lower_candidate or 'command' in lower_candidate) and candidate not in command_links:
-                        command_links.append(candidate)
+            append_matches(vm_links, (m.group('name') for m in XAML_DATACONTEXT_RE.finditer(txt)), ('/viewmodels/', 'viewmodel'))
+            append_matches(vm_links, (m.group('name') for m in XAML_VM_TYPE_RE.finditer(txt) if m.group('prefix').lower() in {'vm', 'viewmodels', 'viewmodel'}), ('/viewmodels/', 'viewmodel'))
+            append_matches(command_links, (m.group('name') for m in XAML_COMMAND_RE.finditer(txt)), ('/commands/', 'command'))
             codebehind_txt = safe_read_text(repo / (canonical_view + '.cs')) if (repo / (canonical_view + '.cs')).exists() else ''
             for m in CS_NEW_RE.finditer(codebehind_txt):
                 created = m.group('name').lower()
-                for candidate in set(edges.keys()) | set(reverse_edges.keys()):
+                for candidate in all_candidates:
                     lower_candidate = candidate.lower()
                     if not lower_candidate.endswith('.cs'):
                         continue
@@ -3041,15 +3072,25 @@ def render_blast_map(
                         elif '/commands/' in lower_candidate or created.endswith('command'):
                             if candidate not in command_links:
                                 command_links.append(candidate)
+            ctor_match = CS_CTOR_INJECT_RE.search(codebehind_txt)
+            if ctor_match:
+                ctor_args = ctor_match.group('args')
+                arg_types = [arg.strip().split()[0] for arg in ctor_args.split(',') if arg.strip()]
+                append_matches(vm_links, arg_types, ('/viewmodels/', 'viewmodel'))
+                append_matches(service_links, arg_types, ('/services/', 'service'))
+                append_matches(command_links, arg_types, ('/commands/', 'command'))
+            if CS_RELAY_COMMAND_RE.search(codebehind_txt):
+                append_matches(command_links, ['RelayCommand', 'DelegateCommand', 'AsyncRelayCommand', 'ReactiveCommand'], ('/commands/', 'command'))
             click_handlers = [m.group('name') for m in XAML_CLICK_RE.finditer(txt)]
             command_names = [m.group('name') for m in XAML_COMMAND_RE.finditer(txt)]
             codebehind_commands = [m.group('name') for m in CS_COMMAND_PROP_RE.finditer(codebehind_txt)]
+            ctor_args = [m.group('name') for m in CS_CTOR_ARG_TYPE_RE.finditer(codebehind_txt)]
             score = len(vm_links) * 3 + len(service_links) * 2 + len(command_links) * 2 + len(control_links) + len(consumers)
             if canonical_view.lower().endswith('mainwindow.xaml'):
                 score += 4
             if '/controls/' in canonical_view.lower():
                 score += 2
-            interaction_hints = click_handlers[:4] + command_names[:4] + codebehind_commands[:4]
+            interaction_hints = click_handlers[:4] + command_names[:4] + codebehind_commands[:4] + ctor_args[:4]
             rows.append((score, canonical_view, vm_links[:5], service_links[:5], command_links[:5], control_links[:5], interaction_hints[:8]))
         rows.sort(key=lambda item: (-item[0], item[1]))
         return rows[:10]
