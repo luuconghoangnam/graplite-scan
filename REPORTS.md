@@ -83,9 +83,10 @@ Notes:
   - `363d3d8` — `feat: improve desktop command binding correlation`
   - `47b7140` — `feat: refine provider and context blast radius`
 - Benchmarking substrate now added in `docs/BENCHMARK_MATRIX.md`
+- Concrete benchmark shortlist now chosen for web / backend / desktop / Flutter
 - Next recommended slice:
-  - Pick concrete candidate repos for web / backend / desktop / Flutter benchmarks
   - Write expected observations for each chosen repo
+  - Fill the remaining gap: one additional MVVM-heavy WPF sample repo
 
 ## Reference Repo Assessment
 

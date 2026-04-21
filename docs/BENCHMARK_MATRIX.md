@@ -191,13 +191,43 @@ For each benchmark run, review these questions:
 
 ---
 
+## Concrete benchmark shortlist
+
+### Web
+- `vercel/next-app-router-playground`
+  - Why: direct pressure-test for nested app-router segments, layouts, loading/error boundaries, and provider-like app shell behavior.
+- `calcom/cal.com`
+  - Why: large real-world Next/web app with substantial app shell, routes, shared UI, and stateful frontend surfaces.
+- `payloadcms/payload`
+  - Why: rich modern web app/admin surface with shared providers, internal routing, and non-trivial frontend layering.
+
+### Backend
+- `fastify/fastify`
+  - Why: route/backend ecosystem anchor; useful for verifying scanner behavior on framework-heavy Node backend structure and avoiding generic-symbol overranking.
+- `nestjs/nest`
+  - Why: tests controller/module/provider-style backend organization and whether graplite can summarize layered server shapes cleanly.
+- `payloadcms/payload`
+  - Why: doubles as a mixed full-stack benchmark where backend and frontend boundaries both matter.
+
+### C# desktop
+- `dotnet/wpf`
+  - Why: important ecosystem reference for WPF structure and desktop surface expectations, even if not a small app-shaped benchmark.
+- `lepoco/wpfui`
+  - Why: practical WPF/UI-oriented repo that should pressure-test views, controls, resources, and desktop app structure summaries.
+- one additional MVVM-heavy WPF sample repo (to be chosen next)
+  - Why: we still need a smaller app-shaped repo with explicit `ViewModel` / `Command` / `Service` conventions.
+
+### Flutter / hybrid
+- `flutter/samples`
+  - Why: broad official sample corpus for testing app structure and avoiding regressions beyond `drops`.
+- `imaNNeo/fl_chart`
+  - Why: useful shared-surface/package-style Flutter benchmark to ensure scanner does not hallucinate app-flow where a library is the dominant shape.
+- `drops`
+  - Why: current anchor repo and regression guard for the product's strongest practical lane.
+
 ## Immediate next benchmark authoring tasks
 
-1. Add a shortlist of concrete candidate repos for:
-   - web
-   - backend
-   - C# desktop
-   - Flutter
-2. For each chosen repo, write 5–10 expected observations
-3. Add a lightweight benchmark run checklist
-4. Start fixing issues based on benchmark misses, not intuition alone
+1. For each chosen repo, write 5–10 expected observations
+2. Add a lightweight benchmark run checklist
+3. Start fixing issues based on benchmark misses, not intuition alone
+4. Fill the remaining gap: one additional MVVM-heavy WPF sample repo
