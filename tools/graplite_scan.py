@@ -138,6 +138,14 @@ CS_CTOR_ARG_TYPE_RE = re.compile(
     r'(?:^|,)\s*(?:I[A-Z][A-Za-z0-9_]*|[A-Z][A-Za-z0-9_]*)\s+(?P<name>[a-z_][A-Za-z0-9_]*)',
     re.M,
 )
+CS_INITIALIZE_COMPONENT_RE = re.compile(
+    r'\bInitializeComponent\s*\(',
+    re.M,
+)
+CS_ICOMMAND_PROP_RE = re.compile(
+    r'\bICommand\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*Command)\b',
+    re.M,
+)
 
 TS_DEF_RES = [
     ("class", re.compile(r"^\s*(?:export\s+)?class\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b", re.M)),
@@ -1098,8 +1106,9 @@ def architecture_summary_lines(
     frontend_prefixes = (
         'app/lib/features/', 'app/lib/core/', 'src/app/', 'src/pages/', 'src/components/',
         'src/features/', 'src/routes/', 'src/hooks/', 'src/stores/', 'src/composables/',
-        'src/state/', 'src/layouts/', 'frontend/src/', 'client/src/', 'web/src/',
-        'pages/', 'components/', 'routes/'
+        'src/state/', 'src/layouts/', 'src/context/', 'src/providers/', 'src/reducers/', 'src/shell/',
+        'frontend/src/', 'client/src/', 'web/src/',
+        'pages/', 'components/', 'routes/', 'context/', 'providers/', 'shell/'
     )
     desktop_prefixes = ('Views/', 'ViewModels/', 'Controls/', 'Models/', 'Converters/', 'Commands/', 'Services/')
     app_groups = [name for name in module_names if name.startswith(frontend_prefixes)]
@@ -1115,17 +1124,19 @@ def architecture_summary_lines(
             return 'feature screens'
         if base in {'components', 'widgets'}:
             return 'UI components'
-        if base in {'hooks', 'stores', 'state', 'composables'}:
+        if base in {'hooks', 'stores', 'state', 'composables', 'context', 'reducers'}:
             return 'state / client logic'
-        if base in {'core', 'lib', 'layouts'}:
+        if base in {'core', 'lib', 'layouts', 'providers', 'shell'}:
             return 'shared app shell/core'
         parts = normalized.split('/')
         if any(part in {'pages', 'routes', 'app'} for part in parts):
             return 'route surface'
         if any(part in {'components', 'widgets'} for part in parts):
             return 'UI components'
-        if any(part in {'hooks', 'stores', 'state', 'composables'} for part in parts):
+        if any(part in {'hooks', 'stores', 'state', 'composables', 'context', 'reducers'} for part in parts):
             return 'state / client logic'
+        if any(part in {'layouts', 'providers', 'shell', 'core', 'lib'} for part in parts):
+            return 'shared app shell/core'
         return None
 
     frontend_labels: List[str] = []
@@ -2918,6 +2929,24 @@ def render_blast_map(
                 if file_path in edges and file_path not in seen:
                     seen.add(file_path)
                     candidates.append(file_path)
+
+            app_router_siblings = ('layout.', 'template.', 'loading.', 'error.', 'not-found.', 'providers.')
+
+            def add_app_router_companion_files(file_path: str) -> None:
+                p = repo / file_path
+                parent = p.parent
+                if not parent.exists() or not parent.is_dir():
+                    return
+                for child in sorted(parent.iterdir(), key=lambda item: item.name.lower()):
+                    if not child.is_file():
+                        continue
+                    lower_name = child.name.lower()
+                    if not any(lower_name.startswith(prefix) for prefix in app_router_siblings):
+                        continue
+                    child_rel = relpath_posix(child, repo)
+                    if child_rel in edges and child_rel not in seen:
+                        seen.add(child_rel)
+                        candidates.append(child_rel)
             preferred_roots = (
                 'src/app/', 'src/pages/', 'src/routes/', 'src/features/', 'src/components/',
                 'src/hooks/', 'src/stores/', 'src/state/', 'src/layouts/', 'frontend/src/',
@@ -2953,7 +2982,8 @@ def render_blast_map(
                     continue
                 seen.add(file_path)
                 candidates.append(file_path)
-            return candidates[:10]
+                add_app_router_companion_files(file_path)
+            return candidates[:14]
 
         flow_rows: List[Tuple[str, List[str], List[str], List[str]]] = []
         for file_path in candidate_frontend_files():
@@ -3084,13 +3114,19 @@ def render_blast_map(
             click_handlers = [m.group('name') for m in XAML_CLICK_RE.finditer(txt)]
             command_names = [m.group('name') for m in XAML_COMMAND_RE.finditer(txt)]
             codebehind_commands = [m.group('name') for m in CS_COMMAND_PROP_RE.finditer(codebehind_txt)]
+            interface_command_props = [m.group('name') for m in CS_ICOMMAND_PROP_RE.finditer(codebehind_txt)]
             ctor_args = [m.group('name') for m in CS_CTOR_ARG_TYPE_RE.finditer(codebehind_txt)]
+            has_initialize_component = bool(CS_INITIALIZE_COMPONENT_RE.search(codebehind_txt))
             score = len(vm_links) * 3 + len(service_links) * 2 + len(command_links) * 2 + len(control_links) + len(consumers)
             if canonical_view.lower().endswith('mainwindow.xaml'):
                 score += 4
             if '/controls/' in canonical_view.lower():
                 score += 2
-            interaction_hints = click_handlers[:4] + command_names[:4] + codebehind_commands[:4] + ctor_args[:4]
+            if has_initialize_component:
+                score += 2
+            interaction_hints = click_handlers[:4] + command_names[:4] + codebehind_commands[:4] + interface_command_props[:4] + ctor_args[:4]
+            if has_initialize_component and 'InitializeComponent' not in interaction_hints:
+                interaction_hints.insert(0, 'InitializeComponent')
             rows.append((score, canonical_view, vm_links[:5], service_links[:5], command_links[:5], control_links[:5], interaction_hints[:8]))
         rows.sort(key=lambda item: (-item[0], item[1]))
         return rows[:10]
