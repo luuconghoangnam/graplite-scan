@@ -16,6 +16,7 @@ Usage:
   graplite project [repo]
   graplite agent [repo]
   graplite init              # create .graplite.json in current repo
+  graplite init --write-runner --write-gitignore
   graplite doctor
   graplite install
   graplite help

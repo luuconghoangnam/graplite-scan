@@ -17,12 +17,14 @@ Local/offline repo scanner that generates two **in-repo** Markdown files optimiz
 Inside any target repo:
 
 ```bash
-graplite init
+graplite init --write-runner --write-gitignore
 graplite scan
 ```
 
 That will:
-- create `.graplite.json` once
+- create `.graplite.json`
+- create `scripts/graplite-scan.sh`
+- append a small graplite block into `.gitignore`
 - generate `MAP.md` + `IMPACT.md`
 
 You can also run:
@@ -50,6 +52,30 @@ python3 tools/graplite_install.py
 ```
 
 Then ensure `~/.local/bin` is in your `PATH`.
+
+---
+
+## 3-command setup on a new machine
+
+```bash
+git clone <graplite-scan-repo>
+cd graplite-scan
+./scripts/setup-local.sh
+```
+
+Then in any target repo:
+
+```bash
+cd /path/to/repo
+graplite init --write-runner --write-gitignore
+graplite scan
+```
+
+After that, future scans are usually just:
+
+```bash
+./scripts/graplite-scan.sh
+```
 
 ---
 
@@ -106,31 +132,15 @@ graplite project .
 # legacy agent naming
 graplite agent .
 
-# create local repo config
+# create local repo config only
 graplite init
+
+# create config + runner + gitignore helper
+graplite init --write-runner --write-gitignore
 
 # environment checks
 graplite doctor
 ```
-
----
-
-## Clone onto another machine
-
-```bash
-git clone <this-repo-url>
-cd graplite-scan
-./scripts/setup-local.sh
-
-cd /path/to/target-repo
-graplite init
-graplite scan
-```
-
-If you want the target repo itself to be portable across machines, commit:
-- `.graplite.json`
-- optional wrapper script such as `scripts/graplite-scan.sh`
-- generated `MAP.md` + `IMPACT.md` only when you intentionally want checked-in docs
 
 ---
 
@@ -139,6 +149,9 @@ If you want the target repo itself to be portable across machines, commit:
 Minimal portable setup:
 - `.graplite.json`
 - `scripts/graplite-scan.sh`
+
+Helpful ignore block:
+- small graplite section in `.gitignore`
 
 Optional checked-in outputs:
 - `MAP.md`

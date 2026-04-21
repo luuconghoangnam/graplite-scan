@@ -1,0 +1,6 @@
+# graplite-scan
+AGENT_MAP.md
+CLAUDE_MAP.md
+PROJECT_FAST_MAP.md
+PROJECT_BLAST_RADIUS.md
+backend/index.scip
