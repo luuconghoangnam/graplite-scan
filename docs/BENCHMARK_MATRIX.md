@@ -225,9 +225,92 @@ For each benchmark run, review these questions:
 - `drops`
   - Why: current anchor repo and regression guard for the product's strongest practical lane.
 
+## Expected observations — web
+
+### `vercel/next-app-router-playground`
+Expected observations:
+1. `MAP.md` should clearly recognize an app-router-shaped frontend rather than a generic React tree.
+2. Route-segment files such as `page`, `layout`, `loading`, `error`, and `not-found` should be treated as meaningful runtime surfaces, not side noise.
+3. Parent layout influence should show up in summaries when nested route segments exist.
+4. Shared app-shell/provider-like surfaces should rank above random leaf UI components.
+5. `IMPACT.md` should make a `layout` change feel broader than a `page`-only change.
+6. `loading` / `error` / `not-found` files should surface as route-visible behavior, not invisible helpers.
+7. Output should stay concise even if many route segments exist.
+
+Anti-noise checks:
+- generic UI leaf components should not dominate the top architecture story
+- utility helpers should not outrank route/layout/app-shell files
+
+### `calcom/cal.com`
+Expected observations:
+1. `MAP.md` should surface a large web app shape with meaningful route/app-shell/shared-surface groupings.
+2. Shared providers, layouts, or shell-like files should appear when they materially influence many pages.
+3. Important stateful frontend layers should rank above isolated component files.
+4. `IMPACT.md` should show believable fan-out for app-shell or provider-like changes.
+5. Changes in route/page surfaces should point to shared shell/state effects when appropriate.
+6. Output should remain readable despite repo size.
+7. Noise from generic frontend plumbing should be contained.
+
+Anti-noise checks:
+- generated/build/config clutter should not take over the summary
+- low-level utility files should not outrank app shell and route surfaces without strong evidence
+
+### `payloadcms/payload` (web/admin angle)
+Expected observations:
+1. `MAP.md` should recognize that this is not a tiny toy frontend, but a layered web/admin surface.
+2. Shared admin/provider/context/state surfaces should appear as meaningful building blocks.
+3. Route/admin shell summaries should avoid collapsing into an unhelpful generic component inventory.
+4. `IMPACT.md` should show believable blast radius for shared provider/context/admin-shell changes.
+5. The scanner should separate broadly shared surfaces from one-off leaf views.
+6. Mixed full-stack shape should not confuse frontend summaries into becoming backend-only.
+
+Anti-noise checks:
+- backend-heavy files should not drown the frontend app-shell view when scanning the full repo
+- component spam should not outrank genuinely shared admin/runtime surfaces
+
+## Expected observations — backend
+
+### `fastify/fastify`
+Expected observations:
+1. `MAP.md` should clearly present a backend/server-oriented shape rather than forcing frontend-style labels.
+2. Route/handler/service-like structure should be summarized in a way that still feels useful on a framework-heavy backend repo.
+3. Generic framework symbols should not dominate the most important impact stories.
+4. `IMPACT.md` should prefer business-relevant or flow-relevant backend files over generic helper noise.
+5. Entry/backend runtime surfaces should be visible if the repo exposes them cleanly.
+6. Output should remain concise even when the repo contains lots of framework internals.
+
+Anti-noise checks:
+- framework internals should not swamp business-meaningful files
+- generic types/symbols should stay below route/service/provider relevance
+
+### `nestjs/nest`
+Expected observations:
+1. `MAP.md` should recognize layered backend structure such as controllers/modules/providers/services when present.
+2. Scanner wording should feel natural for a controller/module/provider backend, not only for Express-style route files.
+3. `IMPACT.md` should show believable impact from controller/service/provider changes.
+4. Shared backend infrastructure should appear when it truly influences many modules.
+5. Output should avoid overclaiming semantic precision where only heuristic evidence exists.
+6. Important backend files should rank above framework boilerplate.
+
+Anti-noise checks:
+- decorator/framework noise should not outrank controllers/services/providers
+- docs/examples/test scaffolding should not dominate the main story
+
+### `payloadcms/payload` (backend/full-stack angle)
+Expected observations:
+1. `MAP.md` should capture that the repo has both frontend and backend value, rather than collapsing into one side only.
+2. Backend-relevant surfaces should still be visible alongside admin/web layers.
+3. `IMPACT.md` should feel plausible when shared backend logic changes, even in a mixed repo.
+4. The scanner should avoid confusing shared full-stack files with purely frontend or purely backend files when evidence is mixed.
+5. Important cross-surface/shared logic should rank above random implementation details.
+
+Anti-noise checks:
+- mixed repo complexity should not cause unreadable summary sprawl
+- scanner should not double-count the same surface in redundant wording
+
 ## Immediate next benchmark authoring tasks
 
-1. For each chosen repo, write 5–10 expected observations
+1. Write expected observations for C# desktop and Flutter candidates
 2. Add a lightweight benchmark run checklist
 3. Start fixing issues based on benchmark misses, not intuition alone
 4. Fill the remaining gap: one additional MVVM-heavy WPF sample repo

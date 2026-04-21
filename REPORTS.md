@@ -84,8 +84,9 @@ Notes:
   - `47b7140` — `feat: refine provider and context blast radius`
 - Benchmarking substrate now added in `docs/BENCHMARK_MATRIX.md`
 - Concrete benchmark shortlist now chosen for web / backend / desktop / Flutter
+- Expected observations are now drafted for the web and backend benchmark candidates in `docs/BENCHMARK_MATRIX.md`
 - Next recommended slice:
-  - Write expected observations for each chosen repo
+  - Write expected observations for C# desktop and Flutter candidates
   - Fill the remaining gap: one additional MVVM-heavy WPF sample repo
 
 ## Reference Repo Assessment
