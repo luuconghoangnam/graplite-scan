@@ -998,7 +998,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             structured_top_reference_hints=[],
         )
     try:
-        stat = index_path.stat()
+        file_stat = index_path.stat()
         data = index_path.read_bytes()
         strings = extract_printable_strings(data[: min(len(data), 1_000_000)])
         document_hints: List[str] = []
@@ -1043,12 +1043,12 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                     else:
                         reference_count += 1
                     if relative_path and symbol:
-                        stat = occurrence_stats.setdefault(symbol, {'defs': 0, 'refs': 0, 'docs': set()})
+                        symbol_stat = occurrence_stats.setdefault(symbol, {'defs': 0, 'refs': 0, 'docs': set()})
                         if is_definition:
-                            stat['defs'] += 1
+                            symbol_stat['defs'] += 1
                         else:
-                            stat['refs'] += 1
-                        stat['docs'].add(relative_path)
+                            symbol_stat['refs'] += 1
+                        symbol_stat['docs'].add(relative_path)
                         occ_kind = 'def' if is_definition else 'ref'
                         occ_label = f'{relative_path} :: {symbol} [{occ_kind}]'
                         if occ_label not in seen_occurrences:
@@ -1073,14 +1073,14 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             key=lambda kv: (kv[1]['refs'], kv[1]['defs'], len(kv[1]['docs']), kv[0]),
             reverse=True,
         )
-        for symbol, stat in ranked_occurrence_stats[:10]:
+        for symbol, symbol_stat in ranked_occurrence_stats[:10]:
             structured_top_reference_hints.append(
-                f"{symbol} [refs={stat['refs']}, defs={stat['defs']}, docs={len(stat['docs'])}]"
+                f"{symbol} [refs={symbol_stat['refs']}, defs={symbol_stat['defs']}, docs={len(symbol_stat['docs'])}]"
             )
 
         summary = [
             f'file exists at `{scip_readiness.index_path}`',
-            f'size ≈ {stat.st_size} bytes',
+            f'size ≈ {file_stat.st_size} bytes',
             f'structured documents: {document_count}',
             f'structured symbols: {len(structured_symbol_hints)}',
             f'structured occurrences: {occurrence_count}',
@@ -1092,7 +1092,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         return ScipIndexStatus(
             exists=True,
             path=scip_readiness.index_path,
-            size_bytes=stat.st_size,
+            size_bytes=file_stat.st_size,
             summary=summary,
             document_hints=document_hints,
             symbol_hints=symbol_hints,
