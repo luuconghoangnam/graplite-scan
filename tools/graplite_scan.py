@@ -949,21 +949,12 @@ def render_architecture_mermaid(
             return value
         return value[: max_len - 3] + '...'
 
-    def pretty_module_label(path: str) -> str:
-        if path.startswith('backend/src/modules/'):
-            return 'backend/' + path.split('/')[-1]
-        if path.startswith('app/lib/features/'):
-            return 'feature/' + path.split('/')[-1]
-        if path.startswith('app/lib/core/'):
-            return 'core/' + path.split('/')[-1]
-        return path.split('/')[-1]
-
     def bucket_for(node_id: str) -> List[str]:
         if node_id.startswith(('app_', 'mod_app_', 'gw_app_', 'hint_app_')):
             return app_defs
         if node_id.startswith(('backend_', 'mod_backend_', 'route_', 'gw_backend_', 'hint_backend_')):
             return backend_defs
-        if node_id.startswith(('flow_', 'hint_flow_')):
+        if node_id.startswith('flow_'):
             return flow_defs
         return node_defs
 
@@ -983,48 +974,89 @@ def render_architecture_mermaid(
         else:
             edge_lines.append(f'    {src} --> {dst}')
 
+    def app_module_label(path: str) -> str:
+        base = path.rstrip('/').split('/')[-1]
+        mapping = {
+            'features': 'feature screens',
+            'core': 'shared client core',
+        }
+        return mapping.get(base, base)
+
+    def backend_module_label(path: str) -> str:
+        base = path.rstrip('/').split('/')[-1]
+        mapping = {
+            'modules': 'transfer module',
+        }
+        return mapping.get(base, base)
+
+    def runtime_label(file_path: str) -> str:
+        base = file_path.split('/')[-1]
+        mapping = {
+            'transfer.controller.ts': 'transfer controller',
+            'transfer.service.ts': 'transfer service',
+            'transfer.gateway.ts': 'transfer gateway',
+            'peer.gateway.ts': 'peer gateway',
+            'chunk-url-provider.ts': 'chunk URL provider',
+            'r2-url-provider.ts': 'R2 URL provider',
+            'cloud_adapter_mobile.dart': 'mobile cloud adapter',
+            'cloud_adapter_web.dart': 'web cloud adapter',
+            'lan_discovery_mobile.dart': 'LAN discovery (mobile)',
+            'lan_discovery_web.dart': 'LAN discovery (web)',
+        }
+        return mapping.get(base, shorten_label(base, 24))
+
     top_names = {name.rstrip('/') for name, _desc in filter_top_summary_items(top_summary)}
     if 'app' in top_names:
-        add_node('app_surface', 'app surface')
+        add_node('app_surface', 'app / client')
         add_edge('repo', 'app_surface')
     if 'backend' in top_names:
-        add_node('backend_surface', 'backend surface')
+        add_node('backend_surface', 'backend / transfer API')
         add_edge('repo', 'backend_surface')
 
     if flutter_entry:
-        add_node('app_entry', shorten_label(flutter_entry))
+        add_node('app_entry', 'app entry')
         add_edge('app_surface', 'app_entry', 'entry')
 
     if backend_entry:
-        add_node('backend_entry', shorten_label(backend_entry))
+        add_node('backend_entry', 'backend entry')
         add_edge('backend_surface', 'backend_entry', 'entry')
 
-    app_features = [name.rstrip('/') for name, _desc in module_summary if name.startswith('app/lib/features/')][:3]
-    app_core = [name.rstrip('/') for name, _desc in module_summary if name.startswith('app/lib/core/')][:2]
-    backend_modules = [name.rstrip('/') for name, _desc in module_summary if name.startswith('backend/src/modules/')][:3]
+    app_features = [name.rstrip('/') for name, _desc in module_summary if name.startswith('app/lib/features/')][:2]
+    app_core = [name.rstrip('/') for name, _desc in module_summary if name.startswith('app/lib/core/')][:1]
+    backend_modules = [name.rstrip('/') for name, _desc in module_summary if name.startswith('backend/src/modules/')][:1]
 
     for name in app_features + app_core:
         node_id = 'mod_app_' + mermaid_safe_id(name)
-        add_node(node_id, pretty_module_label(name))
+        add_node(node_id, app_module_label(name))
         add_edge('app_surface', node_id, 'group')
 
     for name in backend_modules:
         node_id = 'mod_backend_' + mermaid_safe_id(name)
-        add_node(node_id, pretty_module_label(name))
+        add_node(node_id, backend_module_label(name))
         add_edge('backend_surface', node_id, 'group')
 
+    ranked_route_hints = sorted(
+        route_flow_hints,
+        key=lambda hint: (
+            'health' in hint.path,
+            'status' in hint.path,
+            len(hint.path),
+        ),
+    )
+
     seen_route_paths: Set[str] = set()
-    flow_nodes_added: Set[str] = set()
-    for hint in route_flow_hints:
+    runtime_file_order: List[str] = []
+    seen_runtime_files: Set[str] = set()
+    for hint in ranked_route_hints:
         route_key = f'{hint.method} {hint.path}'
         if route_key in seen_route_paths:
             continue
         seen_route_paths.add(route_key)
         route_id = 'route_' + mermaid_safe_id(hint.method + '_' + hint.path)
-        add_node(route_id, shorten_label(route_key, 30))
+        add_node(route_id, shorten_label(route_key, 28))
         add_edge('backend_surface', route_id, 'route')
 
-        chain_files: List[str] = []
+        route_runtime_files: List[str] = []
         seen_files: Set[str] = set()
         for step in hint.chain:
             for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
@@ -1035,47 +1067,71 @@ def render_architecture_mermaid(
                 if not any(token in lower for token in ('controller', 'service', 'gateway', 'provider')):
                     continue
                 seen_files.add(file_path)
-                chain_files.append(file_path)
-        prev = route_id
-        for file_path in chain_files[:2]:
-            file_id = 'flow_' + mermaid_safe_id(file_path)
-            add_node(file_id, shorten_label(file_path.split('/')[-1], 24))
-            add_edge(prev, file_id, 'flow')
-            prev = file_id
-            flow_nodes_added.add(file_id)
-        if len(seen_route_paths) >= 3:
+                route_runtime_files.append(file_path)
+                if file_path not in seen_runtime_files:
+                    seen_runtime_files.add(file_path)
+                    runtime_file_order.append(file_path)
+        if route_runtime_files:
+            first_file = route_runtime_files[0]
+            first_id = 'flow_' + mermaid_safe_id(first_file)
+            add_node(first_id, runtime_label(first_file))
+            add_edge(route_id, first_id, 'uses')
+        if len(seen_route_paths) >= 2:
             break
+
+    spine_candidates = []
+    for file_path in runtime_file_order:
+        lower = file_path.lower()
+        priority = 99
+        if 'controller' in lower:
+            priority = 1
+        elif 'service' in lower:
+            priority = 2
+        elif 'gateway' in lower:
+            priority = 3
+        elif 'provider' in lower:
+            priority = 4
+        spine_candidates.append((priority, file_path))
+    spine_candidates.sort()
+    spine_files = [file_path for _priority, file_path in spine_candidates[:4]]
+
+    prev_spine = 'backend_entry' if backend_entry else 'backend_surface'
+    for file_path in spine_files:
+        flow_id = 'flow_' + mermaid_safe_id(file_path)
+        add_node(flow_id, runtime_label(file_path))
+        add_edge(prev_spine, flow_id, 'spine')
+        prev_spine = flow_id
 
     preferred_app_links = []
     preferred_backend_links = []
     for file_path, hints in sorted(gateway_hints.items()):
         lower = file_path.lower()
-        if any(token in lower for token in ('cloud_adapter', 'lan_discovery')):
+        if any(token in lower for token in ('cloud_adapter_mobile', 'cloud_adapter_web', 'lan_discovery_mobile', 'lan_discovery_web')):
             preferred_app_links.append((file_path, hints))
         elif any(token in lower for token in ('transfer.gateway', 'peer.gateway')):
             preferred_backend_links.append((file_path, hints))
 
     for file_path, hints in preferred_app_links[:2]:
         gw_id = 'gw_app_' + mermaid_safe_id(file_path)
-        add_node(gw_id, shorten_label(file_path.split('/')[-1], 24))
-        add_edge('app_surface', gw_id, 'link')
+        add_node(gw_id, runtime_label(file_path))
+        add_edge('app_surface', gw_id, 'network')
         meaningful = [h for h in hints if not h.startswith(('dart:', 'package:'))]
         meaningful = [h for h in meaningful if not any(t in h.lower() for t in ('content-type', 'content-disposition', 'x-drops-file-size'))]
         if meaningful:
             hint = meaningful[0]
             hint_id = 'hint_app_' + mermaid_safe_id(file_path + hint)
-            add_node(hint_id, shorten_label(hint, 22))
+            add_node(hint_id, shorten_label(hint, 20))
             add_edge(gw_id, hint_id, 'event')
 
     for file_path, hints in preferred_backend_links[:2]:
         gw_id = 'gw_backend_' + mermaid_safe_id(file_path)
-        add_node(gw_id, shorten_label(file_path.split('/')[-1], 24))
+        add_node(gw_id, runtime_label(file_path))
         add_edge('backend_surface', gw_id, 'signal')
         meaningful = [h for h in hints if not h.startswith(('dart:', 'package:'))]
         if meaningful:
             hint = meaningful[0]
             hint_id = 'hint_backend_' + mermaid_safe_id(file_path + hint)
-            add_node(hint_id, shorten_label(hint, 22))
+            add_node(hint_id, shorten_label(hint, 20))
             add_edge(gw_id, hint_id, 'event')
 
     lines.extend(node_defs)
@@ -1088,7 +1144,7 @@ def render_architecture_mermaid(
         lines.extend(backend_defs)
         lines.append('    end')
     if flow_defs:
-        lines.append('    subgraph FLOW["Runtime flow"]')
+        lines.append('    subgraph FLOW["Transfer runtime spine"]')
         lines.extend(flow_defs)
         lines.append('    end')
 
