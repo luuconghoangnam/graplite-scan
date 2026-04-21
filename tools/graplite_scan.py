@@ -1461,10 +1461,17 @@ def render_blast_map(
 
         pruned: List[str] = []
         service_fallbacks: List[str] = []
+        provider_fallbacks: List[str] = []
+        exact_service_hits = 0
+        exact_provider_hits = 0
         for score, label, exact_matches, partial_matches, is_method, is_provider_file, is_service_file, lower_name in ranked:
             keep = False
             if exact_matches > 0:
                 keep = True
+                if is_service_file and is_method:
+                    exact_service_hits += 1
+                if is_provider_file and is_method:
+                    exact_provider_hits += 1
             elif partial_matches > 0 and is_method:
                 keep = True
             elif is_provider_file and any(term in lower_name for term in ('getuploadurl', 'getdownloadurl', 'deletechunk', 'cleanupsession', 'chunkexists')):
@@ -1476,16 +1483,27 @@ def render_blast_map(
                 pruned.append(label)
             elif is_service_file and is_method:
                 service_fallbacks.append(label)
+            elif is_provider_file and is_method:
+                provider_fallbacks.append(label)
+
+        allow_service_fallbacks = exact_service_hits == 0
+        allow_provider_fallbacks = exact_provider_hits == 0
 
         merged: List[str] = []
         seen_labels: Set[str] = set()
-        for label in pruned + service_fallbacks:
-            if label in seen_labels:
-                continue
-            seen_labels.add(label)
-            merged.append(label)
-            if len(merged) >= 8:
-                break
+        merge_sources: List[List[str]] = [pruned]
+        if allow_provider_fallbacks:
+            merge_sources.append(provider_fallbacks)
+        if allow_service_fallbacks:
+            merge_sources.append(service_fallbacks)
+        for source in merge_sources:
+            for label in source:
+                if label in seen_labels:
+                    continue
+                seen_labels.add(label)
+                merged.append(label)
+                if len(merged) >= 8:
+                    return merged
         return merged
     lines: List[str] = []
     lines.append(f"# {blast_name.rsplit('.', 1)[0]} — {repo.name}")
