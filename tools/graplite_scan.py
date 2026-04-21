@@ -845,7 +845,13 @@ def group_scip_symbols_by_file(symbol_hints: List[str]) -> Dict[str, List[str]]:
         file_path, symbol = item.split(' :: ', 1)
         if not symbol:
             continue
-        grouped[file_path].append(symbol)
+        aliases = {file_path}
+        if file_path.startswith('src/'):
+            aliases.add('backend/' + file_path)
+        elif file_path.startswith('backend/src/'):
+            aliases.add(file_path[len('backend/'):])
+        for alias in aliases:
+            grouped[alias].append(symbol)
 
     cleaned: Dict[str, List[str]] = {}
     for file_path, symbols in grouped.items():
