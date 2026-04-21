@@ -1141,18 +1141,22 @@ def render_architecture_mermaid(
             'widgets': (3, 'UI components'),
             'hooks': (4, 'hooks / state'),
             'stores': (4, 'state store'),
+            'state': (4, 'state store'),
             'composables': (4, 'vue composables'),
+            'layouts': (5, 'app shell / layouts'),
             'core': (5, 'shared client core'),
             'lib': (5, 'shared client library'),
         }
         if base in mapping:
             return mapping[base]
-        if any(part in {'pages', 'routes'} for part in parts):
+        if any(part in {'pages', 'routes', 'app'} for part in parts):
             return (1, shorten_label(base or normalized.split('/')[-1], 24))
         if any(part in {'components', 'widgets'} for part in parts):
             return (3, shorten_label(base or normalized.split('/')[-1], 24))
-        if any(part in {'hooks', 'stores', 'composables'} for part in parts):
+        if any(part in {'hooks', 'stores', 'state', 'composables'} for part in parts):
             return (4, shorten_label(base or normalized.split('/')[-1], 24))
+        if any(part in {'layouts', 'core', 'lib'} for part in parts):
+            return (5, shorten_label(base or normalized.split('/')[-1], 24))
         return (6, shorten_label(base or normalized.split('/')[-1], 24))
 
     def classify_backend_group(path: str) -> Tuple[int, str]:
@@ -1198,8 +1202,9 @@ def render_architecture_mermaid(
 
     frontend_prefixes = (
         'app/lib/features/', 'app/lib/core/', 'src/app/', 'src/pages/', 'src/components/',
-        'src/features/', 'src/routes/', 'src/hooks/', 'src/stores/', 'src/composables/',
-        'frontend/src/', 'client/src/', 'web/src/', 'pages/', 'components/', 'routes/'
+        'src/features/', 'src/routes/', 'src/hooks/', 'src/stores/', 'src/state/',
+        'src/composables/', 'src/layouts/', 'frontend/src/', 'client/src/', 'web/src/',
+        'pages/', 'components/', 'routes/'
     )
     backend_prefixes = ('backend/src/modules/', 'server/', 'services/', 'api/')
 
@@ -1315,10 +1320,15 @@ def render_architecture_mermaid(
         add_edge(prev_spine, flow_id, 'spine')
         prev_spine = flow_id
 
-    if has_frontend and not route_flow_hints:
-        frontend_story_order = ['app router', 'route pages', 'route modules', 'feature screens', 'UI components', 'hooks / state', 'state store', 'vue composables', 'shared client core']
+    if has_frontend:
+        frontend_story_order = [
+            'app router', 'route pages', 'route modules', 'feature screens',
+            'UI components', 'hooks / state', 'state store', 'vue composables',
+            'app shell / layouts', 'shared client core', 'shared client library'
+        ]
         prev_front = 'app_entry' if flutter_entry else 'app_surface'
         seen_front_story: Set[str] = set()
+        linked_any = False
         for label in frontend_story_order:
             node_id = frontend_node_ids_by_label.get(label)
             if not node_id or node_id in seen_front_story:
@@ -1326,6 +1336,14 @@ def render_architecture_mermaid(
             seen_front_story.add(node_id)
             add_edge(prev_front, node_id, 'spine')
             prev_front = node_id
+            linked_any = True
+        if not linked_any:
+            fallback_labels = sorted(frontend_node_ids_by_label.items())[:3]
+            for _label, node_id in fallback_labels:
+                if node_id in seen_front_story:
+                    continue
+                add_edge(prev_front, node_id, 'spine')
+                prev_front = node_id
 
     preferred_app_links = []
     preferred_backend_links = []
