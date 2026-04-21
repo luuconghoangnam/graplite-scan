@@ -1998,6 +1998,7 @@ def render_fast_map(
 
 def render_blast_map(
     repo: Path,
+    edges: Dict[str, Set[str]],
     edges_ranked: List[Tuple[str, int, int, int]],
     backend_entry: Optional[str],
     flutter_entry: Optional[str],
@@ -2029,6 +2030,41 @@ def render_blast_map(
         if symbol.startswith('"') and symbol.endswith('"'):
             return True
         return False
+
+    def build_app_feature_flow_map() -> List[Tuple[str, List[str], List[str], List[str]]]:
+        feature_files = [
+            'app/lib/features/send/send_page.dart',
+            'app/lib/features/receive/receive_page.dart',
+            'app/lib/features/lan/lan_tab_page.dart',
+            'app/lib/features/internet/internet_tab_page.dart',
+            'app/lib/features/settings/settings_page.dart',
+        ]
+        flow_rows: List[Tuple[str, List[str], List[str], List[str]]] = []
+        for file_path in feature_files:
+            deps = sorted(edges.get(file_path, set()))
+            if not deps:
+                continue
+            core_links = [
+                dep for dep in deps
+                if dep.startswith('app/lib/core/transfer/')
+                or dep.startswith('app/lib/core/platform/')
+                or dep.startswith('app/lib/core/services/')
+            ]
+            util_links = [
+                dep for dep in deps
+                if dep.startswith('app/lib/core/utils/')
+                or dep.startswith('app/lib/core/widgets/')
+                or dep.startswith('app/lib/core/theme/')
+            ]
+            platform_links = [
+                dep for dep in deps
+                if 'platform' in dep.lower()
+                or 'discovery' in dep.lower()
+                or 'cloud_adapter' in dep.lower()
+                or 'transfer_service' in dep.lower()
+            ]
+            flow_rows.append((file_path, core_links[:8], util_links[:8], platform_links[:8]))
+        return flow_rows
 
     def rank_route_symbols(impacted: List[str], chain: List[str]) -> List[str]:
         keywords = extract_route_keywords_from_steps(chain)
@@ -2283,6 +2319,24 @@ def render_blast_map(
                     file_to_routes[file_path].append(route_label)
                     seen_files.add(file_path)
                 file_to_steps[file_path].append(step)
+
+    lines.append("## App-side feature impact")
+    app_feature_flow_map = build_app_feature_flow_map()
+    if app_feature_flow_map:
+        for file_path, core_links, util_links, platform_links in app_feature_flow_map:
+            lines.append(f"### If changing `{file_path}`")
+            if core_links:
+                lines.append(f"- Core/service links: {', '.join(f'`{item}`' for item in core_links[:8])}")
+            if platform_links:
+                lines.append(f"- Transfer/platform/discovery links: {', '.join(f'`{item}`' for item in platform_links[:8])}")
+            if util_links:
+                lines.append(f"- UI/util/theme dependencies: {', '.join(f'`{item}`' for item in util_links[:8])}")
+            app_symbols = scip_symbols_by_file.get(file_path, [])
+            if app_symbols:
+                lines.append(f"- Structured symbols in file: {', '.join(f'`{item}`' for item in app_symbols[:6])}")
+    else:
+        lines.append("- (No app-side feature flow map detected yet.)")
+    lines.append("")
 
     lines.append("## Flow-aware impact map")
     if route_flow_hints:
@@ -2784,6 +2838,7 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
     )
     blast_lines = render_blast_map(
         repo=repo,
+        edges=edges,
         edges_ranked=ranked_files,
         backend_entry=backend_entry,
         flutter_entry=flutter_entry,
