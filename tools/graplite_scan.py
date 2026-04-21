@@ -2066,6 +2066,52 @@ def render_blast_map(
             flow_rows.append((file_path, core_links[:8], util_links[:8], platform_links[:8]))
         return flow_rows
 
+    def business_risk_profile(file_path: str, out_degree: int, in_degree: int) -> Tuple[int, List[str]]:
+        score = out_degree + in_degree
+        reasons: List[str] = []
+        lower = file_path.lower()
+
+        if in_degree >= 5:
+            reasons.append('high fan-in')
+        if out_degree >= 5:
+            reasons.append('high fan-out')
+
+        if '/transfer/' in lower or 'transfer.' in lower:
+            score += 12
+            reasons.append('transfer core')
+        if lower.endswith('service.ts') or lower.endswith('transfer_service.dart'):
+            score += 10
+            reasons.append('service layer')
+        if lower.endswith('controller.ts'):
+            score += 9
+            reasons.append('route/controller layer')
+        if lower.endswith('gateway.ts'):
+            score += 10
+            reasons.append('realtime gateway')
+        if lower.endswith('provider.ts') or 'cloud_adapter' in lower:
+            score += 8
+            reasons.append('storage/provider path')
+        if 'platform_io' in lower or 'lan_discovery' in lower:
+            score += 7
+            reasons.append('platform/discovery path')
+        if '/features/' in lower and any(token in lower for token in ('send_', 'receive_', 'lan_', 'internet_', 'settings_')):
+            score += 5
+            reasons.append('feature entry surface')
+        if '/core/widgets/' in lower or '/core/theme/' in lower:
+            score -= 4
+            reasons.append('ui support layer')
+        if '/core/utils/' in lower:
+            score -= 2
+            reasons.append('utility layer')
+
+        deduped: List[str] = []
+        seen_reasons: Set[str] = set()
+        for reason in reasons:
+            if reason not in seen_reasons:
+                seen_reasons.add(reason)
+                deduped.append(reason)
+        return score, deduped[:4]
+
     def rank_route_symbols(impacted: List[str], chain: List[str]) -> List[str]:
         keywords = extract_route_keywords_from_steps(chain)
         keyword_set = {kw.lower() for kw in keywords}
@@ -2288,19 +2334,19 @@ def render_blast_map(
         lines.append("- `ExtentionChrome/extension/`: impacts extension/browser integration")
     lines.append("")
 
-    lines.append("## Highest-risk files (by dependency centrality)")
+    lines.append("## Highest-risk files (weighted by dependency centrality + business criticality)")
     if edges_ranked:
-        lines.append("| file | total degree | why |")
-        lines.append("|---|---:|---|")
-        for f, o, i, t in edges_ranked[:35]:
-            why = []
-            if i >= 5:
-                why.append("high fan-in")
-            if o >= 5:
-                why.append("high fan-out")
-            if not why:
-                why.append("connected")
-            lines.append(f"| `{f}` | {t} | {', '.join(why)} |")
+        weighted_files: List[Tuple[int, str, int, int, int, List[str]]] = []
+        for f, o, i, t in edges_ranked:
+            weighted_score, reasons = business_risk_profile(f, o, i)
+            weighted_files.append((weighted_score, f, o, i, t, reasons))
+        weighted_files.sort(key=lambda item: (-item[0], -item[4], item[1]))
+
+        lines.append("| file | weighted risk | total degree | why |")
+        lines.append("|---|---:|---:|---|")
+        for weighted_score, f, _o, _i, t, reasons in weighted_files[:35]:
+            why = reasons[:] if reasons else ['connected']
+            lines.append(f"| `{f}` | {weighted_score} | {t} | {', '.join(why)} |")
     else:
         lines.append("- (No import graph available.)")
     lines.append("")
