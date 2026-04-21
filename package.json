@@ -1,6 +1,6 @@
 {
   "name": "graplite-scan",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": false,
   "description": "Local/offline project scanner that emits MAP.md and IMPACT.md",
   "bin": {
