@@ -1091,6 +1091,44 @@ def render_blast_map(
     scip_symbols_by_file: Dict[str, List[str]],
     blast_name: str,
 ) -> List[str]:
+    def extract_route_keywords(chain: List[str]) -> List[str]:
+        keywords: List[str] = []
+        for step in chain:
+            for m in re.finditer(r'`([A-Za-z_][A-Za-z0-9_]*)\(\)`', step):
+                keywords.append(m.group(1))
+            for m in re.finditer(r'via `([^`]+)`', step):
+                parts = [p.strip() for p in m.group(1).split(',')]
+                for part in parts:
+                    if part:
+                        keywords.append(part)
+        return keywords
+
+    def rank_route_symbols(impacted: List[str], chain: List[str]) -> List[str]:
+        keywords = extract_route_keywords(chain)
+        ranked: List[Tuple[int, str]] = []
+        seen: Set[str] = set()
+        for file_path in impacted:
+            for symbol in scip_symbols_by_file.get(file_path, []):
+                label = f"{file_path} :: {symbol}"
+                if label in seen:
+                    continue
+                seen.add(label)
+                score = 0
+                lower_symbol = symbol.lower()
+                if '#' in symbol or '()' in symbol:
+                    score += 5
+                if file_path.endswith('provider.ts'):
+                    score += 2
+                for kw in keywords:
+                    if kw.lower() in lower_symbol:
+                        score += 20
+                if '#' in symbol and any(kw.lower() in lower_symbol for kw in keywords):
+                    score += 8
+                if score <= 0 and ('#' not in symbol and '()' not in symbol):
+                    continue
+                ranked.append((score, label))
+        ranked.sort(key=lambda x: (-x[0], x[1]))
+        return [label for _, label in ranked[:8]]
     lines: List[str] = []
     lines.append(f"# {blast_name.rsplit('.', 1)[0]} — {repo.name}")
     lines.append("")
@@ -1191,14 +1229,7 @@ def render_blast_map(
                         impacted.append(file_path)
             if impacted:
                 lines.append(f"- Impacted files in this path: {', '.join(f'`{p}`' for p in impacted[:8])}")
-                route_symbols: List[str] = []
-                seen_symbols: Set[str] = set()
-                for file_path in impacted:
-                    for symbol in scip_symbols_by_file.get(file_path, []):
-                        if symbol in seen_symbols:
-                            continue
-                        seen_symbols.add(symbol)
-                        route_symbols.append(f"{file_path} :: {symbol}")
+                route_symbols = rank_route_symbols(impacted, hint.chain)
                 if route_symbols:
                     lines.append(f"- Relevant SCIP symbols: {', '.join(f'`{s}`' for s in route_symbols[:8])}")
             for step in hint.chain[1:6]:
