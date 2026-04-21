@@ -173,6 +173,26 @@ class RouteFlowHint:
     chain: List[str]
 
 
+@dataclass
+class ScipReadiness:
+    enabled: bool
+    repo_kind: str
+    indexer: str
+    project_root: str
+    index_path: str
+    reasons: List[str]
+
+
+@dataclass
+class ScipIndexStatus:
+    exists: bool
+    path: str
+    size_bytes: int
+    summary: List[str]
+    document_hints: List[str]
+    symbol_hints: List[str]
+
+
 def is_ignored(path: Path, ignore_dirs: Set[str]) -> bool:
     return any(part in ignore_dirs for part in path.parts)
 
@@ -676,6 +696,131 @@ def approx_symbol_scores(symbols: List[SymbolDef], file_lang: Dict[str, str], re
     return counts
 
 
+def detect_scip_readiness(repo: Path) -> ScipReadiness:
+    candidates = [
+        (repo / 'backend', 'typescript-subproject'),
+        (repo, 'typescript-root'),
+    ]
+    for root, kind in candidates:
+        if not root.exists():
+            continue
+        has_tsconfig = any((root / name).exists() for name in ('tsconfig.json', 'tsconfig.base.json'))
+        has_package = (root / 'package.json').exists()
+        if not has_package:
+            continue
+        reasons: List[str] = []
+        if has_tsconfig:
+            reasons.append('tsconfig detected')
+            return ScipReadiness(
+                enabled=True,
+                repo_kind=kind,
+                indexer='scip-typescript index',
+                project_root=relpath_posix(root, repo),
+                index_path=relpath_posix(root / 'index.scip', repo),
+                reasons=reasons,
+            )
+        reasons.append('package.json detected, tsconfig missing')
+        return ScipReadiness(
+            enabled=True,
+            repo_kind='javascript-root',
+            indexer='scip-typescript index --infer-tsconfig',
+            project_root=relpath_posix(root, repo),
+            index_path=relpath_posix(root / 'index.scip', repo),
+            reasons=reasons,
+        )
+    return ScipReadiness(
+        enabled=False,
+        repo_kind='unsupported',
+        indexer='scip-typescript index',
+        project_root='.',
+        index_path='index.scip',
+        reasons=['no package.json/tsconfig combination detected for TS/JS indexing'],
+    )
+
+
+def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipIndexStatus:
+    def extract_printable_strings(data: bytes, min_len: int = 6) -> List[str]:
+        out: List[str] = []
+        cur: List[str] = []
+        for b in data:
+            if 32 <= b < 127:
+                cur.append(chr(b))
+            else:
+                if len(cur) >= min_len:
+                    out.append(''.join(cur))
+                cur = []
+        if len(cur) >= min_len:
+            out.append(''.join(cur))
+        return out
+
+    def clean_symbol_hint(raw: str) -> str:
+        raw = raw.strip()
+        raw = re.sub(r'^[^a-zA-Z]+', '', raw)
+        return raw
+
+    index_path = repo / scip_readiness.index_path
+    if not scip_readiness.enabled:
+        return ScipIndexStatus(
+            exists=False,
+            path=scip_readiness.index_path,
+            size_bytes=0,
+            summary=['SCIP not enabled for this repo shape yet'],
+            document_hints=[],
+            symbol_hints=[],
+        )
+    if not index_path.exists() or not index_path.is_file():
+        return ScipIndexStatus(
+            exists=False,
+            path=scip_readiness.index_path,
+            size_bytes=0,
+            summary=['index file not generated yet'],
+            document_hints=[],
+            symbol_hints=[],
+        )
+    try:
+        stat = index_path.stat()
+        data = index_path.read_bytes()
+        strings = extract_printable_strings(data[: min(len(data), 1_000_000)])
+        document_hints: List[str] = []
+        symbol_hints: List[str] = []
+        seen_docs: Set[str] = set()
+        seen_symbols: Set[str] = set()
+        for s in strings:
+            for m in re.finditer(r'src/[A-Za-z0-9_./\-]+\.ts', s):
+                path = m.group(0)
+                if path not in seen_docs:
+                    seen_docs.add(path)
+                    document_hints.append(path)
+            if 'scip-typescript npm' in s and '/`' in s:
+                cleaned = clean_symbol_hint(s)
+                if cleaned and cleaned not in seen_symbols:
+                    seen_symbols.add(cleaned)
+                    symbol_hints.append(cleaned)
+        summary = [
+            f'file exists at `{scip_readiness.index_path}`',
+            f'size ≈ {stat.st_size} bytes',
+            f'printable document hints: {len(document_hints)}',
+            f'printable symbol hints: {len(symbol_hints)}',
+        ]
+        return ScipIndexStatus(
+            exists=True,
+            path=scip_readiness.index_path,
+            size_bytes=stat.st_size,
+            summary=summary,
+            document_hints=document_hints[:20],
+            symbol_hints=symbol_hints[:20],
+        )
+    except Exception as err:
+        return ScipIndexStatus(
+            exists=False,
+            path=scip_readiness.index_path,
+            size_bytes=0,
+            summary=[f'failed to inspect index file: {err}'],
+            document_hints=[],
+            symbol_hints=[],
+        )
+
+
 def render_fast_map(
     repo: Path,
     tree: List[str],
@@ -698,6 +843,8 @@ def render_fast_map(
     gateway_hints: Dict[str, List[str]],
     transfer_flow_hints: List[TransferFileHint],
     route_flow_hints: List[RouteFlowHint],
+    scip_readiness: ScipReadiness,
+    scip_index_status: ScipIndexStatus,
     fast_name: str,
     blast_name: str,
 ) -> List[str]:
@@ -824,6 +971,31 @@ def render_fast_map(
         lines.append("- (No route flow chains detected.)")
     lines.append("")
 
+    lines.append("## SCIP / Tier-B readiness")
+    lines.append(f"- Enabled: `{'yes' if scip_readiness.enabled else 'no'}`")
+    lines.append(f"- Repo kind: `{scip_readiness.repo_kind}`")
+    lines.append(f"- Suggested indexer command: `{scip_readiness.indexer}`")
+    lines.append(f"- Suggested project root: `{scip_readiness.project_root}`")
+    lines.append(f"- Expected index output: `{scip_readiness.index_path}`")
+    lines.append(f"- Index present now: `{'yes' if scip_index_status.exists else 'no'}`")
+    if scip_index_status.summary:
+        lines.append("- Index status:")
+        for item in scip_index_status.summary[:6]:
+            lines.append(f"  - {item}")
+    if scip_readiness.reasons:
+        lines.append("- Detection notes:")
+        for reason in scip_readiness.reasons[:6]:
+            lines.append(f"  - {reason}")
+    if scip_index_status.document_hints:
+        lines.append("- SCIP document hints:")
+        for item in scip_index_status.document_hints[:10]:
+            lines.append(f"  - `{item}`")
+    if scip_index_status.symbol_hints:
+        lines.append("- SCIP symbol hints:")
+        for item in scip_index_status.symbol_hints[:8]:
+            lines.append(f"  - `{item}`")
+    lines.append("")
+
     lines.append("## File dependency hotspots (import graph)")
     if edges_ranked:
         lines.append("| file | out | in | total |")
@@ -868,6 +1040,9 @@ def render_blast_map(
     backend_entry: Optional[str],
     flutter_entry: Optional[str],
     gateway_hints: Dict[str, List[str]],
+    route_flow_hints: List[RouteFlowHint],
+    scip_readiness: ScipReadiness,
+    scip_index_status: ScipIndexStatus,
     blast_name: str,
 ) -> List[str]:
     lines: List[str] = []
@@ -902,6 +1077,77 @@ def render_blast_map(
         lines.append("- (No import graph available.)")
     lines.append("")
 
+    route_to_steps: Dict[str, List[str]] = {}
+    file_to_routes: Dict[str, List[str]] = defaultdict(list)
+    file_to_steps: Dict[str, List[str]] = defaultdict(list)
+    for hint in route_flow_hints:
+        route_label = f"{hint.method} {hint.path}"
+        route_to_steps[route_label] = hint.chain[:]
+        seen_files: Set[str] = set()
+        for step in hint.chain:
+            for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
+                file_path = file_match.split(':', 1)[0]
+                if file_path not in seen_files:
+                    file_to_routes[file_path].append(route_label)
+                    seen_files.add(file_path)
+                file_to_steps[file_path].append(step)
+
+    lines.append("## Flow-aware impact map")
+    if route_flow_hints:
+        important_files = [
+            'backend/src/modules/transfer/transfer.controller.ts',
+            'backend/src/modules/transfer/transfer.service.ts',
+            'backend/src/modules/transfer/chunk-url-provider.ts',
+            'backend/src/modules/transfer/r2-url-provider.ts',
+            'backend/src/modules/transfer/transfer.gateway.ts',
+            'backend/src/modules/transfer/peer.gateway.ts',
+        ]
+        rendered_any = False
+        for file_path in important_files:
+            routes = file_to_routes.get(file_path, [])
+            steps = file_to_steps.get(file_path, [])
+            if not routes and file_path not in gateway_hints:
+                continue
+            rendered_any = True
+            lines.append(f"### If changing `{file_path}`")
+            if routes:
+                lines.append(f"- Likely affects routes: {', '.join(f'`{r}`' for r in routes[:10])}")
+            uniq_steps = []
+            seen_steps = set()
+            for step in steps:
+                if step not in seen_steps:
+                    seen_steps.add(step)
+                    uniq_steps.append(step)
+            if uniq_steps:
+                lines.append("- Touchpoints in known flow:")
+                for step in uniq_steps[:6]:
+                    lines.append(f"  - {step}")
+            if file_path in gateway_hints:
+                lines.append(f"- Event/message schema hints: {', '.join(f'`{h}`' for h in gateway_hints[file_path][:12])}")
+        if not rendered_any:
+            lines.append("- (No flow-aware impact map detected yet.)")
+    else:
+        lines.append("- (No route flow hints available yet.)")
+    lines.append("")
+
+    lines.append("## Route-centric impact")
+    if route_flow_hints:
+        for hint in route_flow_hints[:12]:
+            lines.append(f"### `{hint.method} {hint.path}`")
+            impacted = []
+            for step in hint.chain:
+                for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
+                    file_path = file_match.split(':', 1)[0]
+                    if file_path not in impacted:
+                        impacted.append(file_path)
+            if impacted:
+                lines.append(f"- Impacted files in this path: {', '.join(f'`{p}`' for p in impacted[:8])}")
+            for step in hint.chain[1:6]:
+                lines.append(f"- {step}")
+    else:
+        lines.append("- (No route-centric impact available.)")
+    lines.append("")
+
     lines.append("## Change recipes")
     if backend_entry:
         lines.append(f"- If changing `{backend_entry}`: verify server boots, health endpoints, route registration, WS on/off")
@@ -909,11 +1155,29 @@ def render_blast_map(
         lines.append(f"- If changing `{flutter_entry}`: verify app boot, service init, navigation, transfer flow startup")
     if gateway_hints:
         lines.append("- If changing gateway/transfer modules: run end-to-end transfer smoke test and watch message/event schema drift")
+    if route_flow_hints:
+        lines.append("- If changing transfer controller/service/provider files: verify session create/join, upload-url, download-url, complete, cancel, receiver-ready flows")
+    lines.append("")
+
+    lines.append("## Tier-B / SCIP status")
+    lines.append(f"- Ready now: `{'yes' if scip_readiness.enabled else 'no'}`")
+    lines.append(f"- Suggested indexer: `{scip_readiness.indexer}`")
+    lines.append(f"- Suggested project root: `{scip_readiness.project_root}`")
+    lines.append(f"- Expected index path: `{scip_readiness.index_path}`")
+    lines.append(f"- Index present now: `{'yes' if scip_index_status.exists else 'no'}`")
+    if scip_index_status.summary:
+        for item in scip_index_status.summary[:4]:
+            lines.append(f"- {item}")
+    if scip_index_status.document_hints:
+        lines.append(f"- Example indexed docs: {', '.join(f'`{x}`' for x in scip_index_status.document_hints[:5])}")
+    if scip_index_status.symbol_hints:
+        lines.append(f"- Example indexed symbols: {', '.join(f'`{x}`' for x in scip_index_status.symbol_hints[:4])}")
     lines.append("")
 
     lines.append("## Next step")
-    lines.append("1) Add SCIP-based refs/defs for real callers/callees")
-    lines.append("2) Add `--diff <range>` to map changed files/symbols → impacted files/symbols")
+    lines.append("1) Generate SCIP index for TS/JS subproject and parse refs/defs")
+    lines.append("2) Add callers/callees + symbol-level impact from SCIP")
+    lines.append("3) Add `--diff <range>` to map changed files/symbols → impacted graph")
     return lines
 
 
@@ -952,6 +1216,8 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
     gateway_hints = extract_gateway_hints(repo, scan_subdirs, ignore_dirs)
     transfer_flow_hints = extract_transfer_flow_hints(repo, scan_subdirs, ignore_dirs)
     route_flow_hints = extract_route_flow_hints(repo)
+    scip_readiness = detect_scip_readiness(repo)
+    scip_index_status = detect_scip_index_status(repo, scip_readiness)
     top_summary = top_level_summary(repo, ignore_dirs)
     module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
     edge_details = file_dependency_details(edges, ranked_files)
@@ -978,6 +1244,8 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
         gateway_hints=gateway_hints,
         transfer_flow_hints=transfer_flow_hints,
         route_flow_hints=route_flow_hints,
+        scip_readiness=scip_readiness,
+        scip_index_status=scip_index_status,
         fast_name=fast_name,
         blast_name=blast_name,
     )
@@ -987,6 +1255,9 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str) -> Tup
         backend_entry=backend_entry,
         flutter_entry=flutter_entry,
         gateway_hints=gateway_hints,
+        route_flow_hints=route_flow_hints,
+        scip_readiness=scip_readiness,
+        scip_index_status=scip_index_status,
         blast_name=blast_name,
     )
 
