@@ -875,6 +875,53 @@ def nested_module_summary(
     return out
 
 
+def detect_backend_entry(repo: Path) -> Optional[str]:
+    candidates = (
+        "backend/src/main.ts", "backend/src/index.ts", "src/main.ts", "src/index.ts",
+        "server/index.ts", "server/main.ts", "api/index.ts", "api/server.ts",
+        "backend/src/main.js", "backend/src/index.js", "server/index.js", "server/main.js",
+        "src/server.ts", "src/app.ts", "server/app.ts", "api/app.ts",
+    )
+    for cand in candidates:
+        if (repo / cand).exists():
+            return cand
+    return None
+
+
+def detect_frontend_entry(repo: Path) -> Optional[str]:
+    priority_candidates = (
+        "app/lib/main.dart", "lib/main.dart",
+        "src/main.tsx", "src/main.jsx", "src/main.ts", "src/main.js",
+        "frontend/src/main.tsx", "frontend/src/main.jsx", "frontend/src/main.ts", "frontend/src/main.js",
+        "client/src/main.tsx", "client/src/main.jsx", "client/src/main.ts", "client/src/main.js",
+        "web/src/main.ts", "web/src/main.js", "web/src/main.tsx", "web/src/main.jsx",
+        "pages/_app.tsx", "pages/_app.jsx", "pages/index.tsx", "pages/index.jsx",
+        "app/page.tsx", "app/page.jsx", "src/app/page.tsx", "src/app/page.jsx",
+        "src/App.tsx", "src/App.jsx", "frontend/src/App.tsx", "frontend/src/App.jsx",
+        "client/src/App.tsx", "client/src/App.jsx", "web/src/App.tsx", "web/src/App.jsx",
+    )
+    for cand in priority_candidates:
+        if (repo / cand).exists():
+            return cand
+
+    for rel in (
+        "app", "src/app", "pages", "src/pages", "src/routes", "routes",
+        "src", "frontend/src", "client/src", "web/src",
+    ):
+        base = repo / rel
+        if not base.exists() or not base.is_dir():
+            continue
+        for name in (
+            "page.tsx", "page.jsx", "layout.tsx", "layout.jsx",
+            "index.tsx", "index.jsx", "main.tsx", "main.jsx", "main.ts", "main.js",
+            "App.tsx", "App.jsx", "app.tsx", "app.jsx",
+        ):
+            matches = sorted(base.rglob(name))
+            if matches:
+                return relpath_posix(matches[0], repo)
+    return None
+
+
 def architecture_summary_lines(
     repo: Path,
     top_summary: List[Tuple[str, str]],
@@ -3302,27 +3349,8 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
     tree = list_tree(repo, max_depth=3, ignore_dirs=ignore_dirs, ignore_paths=ignore_paths)
     manifests = find_manifests(repo, max_depth=4, ignore_dirs=ignore_dirs, ignore_paths=ignore_paths)
 
-    backend_entry = None
-    for cand in (
-        "backend/src/main.ts", "backend/src/index.ts", "src/main.ts", "src/index.ts",
-        "server/index.ts", "server/main.ts", "api/index.ts", "api/server.ts",
-        "backend/src/main.js", "backend/src/index.js", "server/index.js", "server/main.js",
-    ):
-        if (repo / cand).exists():
-            backend_entry = cand
-            break
-    flutter_entry = None
-    for cand in (
-        "app/lib/main.dart", "lib/main.dart",
-        "src/main.tsx", "src/main.jsx", "src/App.tsx", "src/App.jsx",
-        "frontend/src/main.tsx", "frontend/src/main.jsx", "frontend/src/App.tsx", "frontend/src/App.jsx",
-        "client/src/main.tsx", "client/src/main.jsx", "client/src/App.tsx", "client/src/App.jsx",
-        "web/src/main.ts", "web/src/main.js", "pages/_app.tsx", "pages/index.tsx",
-        "app/page.tsx", "src/app/page.tsx",
-    ):
-        if (repo / cand).exists():
-            flutter_entry = cand
-            break
+    backend_entry = detect_backend_entry(repo)
+    flutter_entry = detect_frontend_entry(repo)
 
     scripts_map: Dict[str, Dict[str, str]] = {}
     for rel in ("package.json", "backend/package.json", "app/package.json"):
