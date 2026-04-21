@@ -1014,20 +1014,47 @@ def render_architecture_mermaid(
         else:
             edge_lines.append(f'    {src} --> {dst}')
 
-    def app_module_label(path: str) -> str:
-        base = path.rstrip('/').split('/')[-1]
+    def classify_frontend_group(path: str) -> Tuple[int, str]:
+        normalized = path.rstrip('/')
+        base = normalized.split('/')[-1].lower()
+        parts = normalized.split('/')
         mapping = {
-            'features': 'feature screens',
-            'core': 'shared client core',
+            'app': (1, 'app router'),
+            'pages': (1, 'route pages'),
+            'routes': (1, 'route modules'),
+            'features': (2, 'feature screens'),
+            'components': (3, 'UI components'),
+            'widgets': (3, 'UI components'),
+            'hooks': (4, 'hooks / state'),
+            'stores': (4, 'state store'),
+            'composables': (4, 'vue composables'),
+            'core': (5, 'shared client core'),
+            'lib': (5, 'shared client library'),
         }
-        return mapping.get(base, base)
+        if base in mapping:
+            return mapping[base]
+        if any(part in {'pages', 'routes'} for part in parts):
+            return (1, shorten_label(base or normalized.split('/')[-1], 24))
+        if any(part in {'components', 'widgets'} for part in parts):
+            return (3, shorten_label(base or normalized.split('/')[-1], 24))
+        if any(part in {'hooks', 'stores', 'composables'} for part in parts):
+            return (4, shorten_label(base or normalized.split('/')[-1], 24))
+        return (6, shorten_label(base or normalized.split('/')[-1], 24))
 
-    def backend_module_label(path: str) -> str:
-        base = path.rstrip('/').split('/')[-1]
+    def classify_backend_group(path: str) -> Tuple[int, str]:
+        normalized = path.rstrip('/')
+        base = normalized.split('/')[-1].lower()
         mapping = {
-            'modules': 'transfer module',
+            'modules': (1, 'backend modules'),
+            'api': (1, 'API handlers'),
+            'routes': (1, 'route handlers'),
+            'controllers': (2, 'controllers'),
+            'services': (3, 'services'),
+            'gateways': (4, 'realtime gateways'),
+            'providers': (5, 'providers / adapters'),
+            'lib': (6, 'shared server lib'),
         }
-        return mapping.get(base, base)
+        return mapping.get(base, (7, shorten_label(base or normalized.split('/')[-1], 24)))
 
     def runtime_label(file_path: str) -> str:
         base = file_path.split('/')[-1]
@@ -1042,37 +1069,69 @@ def render_architecture_mermaid(
             'cloud_adapter_web.dart': 'web cloud adapter',
             'lan_discovery_mobile.dart': 'LAN discovery (mobile)',
             'lan_discovery_web.dart': 'LAN discovery (web)',
+            'main.dart': 'app bootstrap',
+            'main.tsx': 'frontend bootstrap',
+            'main.jsx': 'frontend bootstrap',
+            'app.tsx': 'app shell',
+            'app.jsx': 'app shell',
+            'page.tsx': 'route page',
+            'page.jsx': 'route page',
         }
-        return mapping.get(base, shorten_label(base, 24))
+        return mapping.get(base.lower(), shorten_label(base, 24))
 
     top_names = {name.rstrip('/') for name, _desc in filter_top_summary_items(top_summary)}
-    if 'app' in top_names:
-        add_node('app_surface', 'app / client')
+    module_names = [name.rstrip('/') for name, _desc in module_summary]
+
+    frontend_prefixes = (
+        'app/lib/features/', 'app/lib/core/', 'src/app/', 'src/pages/', 'src/components/',
+        'src/features/', 'src/routes/', 'src/hooks/', 'src/stores/', 'src/composables/',
+        'frontend/src/', 'client/src/', 'web/src/', 'pages/', 'components/', 'routes/'
+    )
+    backend_prefixes = ('backend/src/modules/', 'server/', 'services/', 'api/')
+
+    frontend_groups = [name for name in module_names if name.startswith(frontend_prefixes)]
+    backend_groups = [name for name in module_names if name.startswith(backend_prefixes)]
+    has_frontend = bool(frontend_groups or flutter_entry or (top_names & {'app', 'frontend', 'client', 'web'}))
+    has_backend = bool(backend_groups or backend_entry or 'backend' in top_names or 'server' in top_names)
+
+    if has_frontend:
+        add_node('app_surface', 'frontend / app shell')
         add_edge('repo', 'app_surface')
-    if 'backend' in top_names:
-        add_node('backend_surface', 'backend / transfer API')
+    if has_backend:
+        backend_label = 'backend / API' if route_flow_hints else 'backend / services'
+        add_node('backend_surface', backend_label)
         add_edge('repo', 'backend_surface')
 
-    if flutter_entry:
-        add_node('app_entry', 'app entry')
+    if flutter_entry and has_frontend:
+        add_node('app_entry', runtime_label(flutter_entry))
         add_edge('app_surface', 'app_entry', 'entry')
 
-    if backend_entry:
+    if backend_entry and has_backend:
         add_node('backend_entry', 'backend entry')
         add_edge('backend_surface', 'backend_entry', 'entry')
 
-    app_features = [name.rstrip('/') for name, _desc in module_summary if name.startswith('app/lib/features/')][:2]
-    app_core = [name.rstrip('/') for name, _desc in module_summary if name.startswith('app/lib/core/')][:1]
-    backend_modules = [name.rstrip('/') for name, _desc in module_summary if name.startswith('backend/src/modules/')][:1]
+    selected_frontend: List[Tuple[int, str, str]] = []
+    for name in frontend_groups:
+        priority, label = classify_frontend_group(name)
+        selected_frontend.append((priority, label, name))
+    selected_frontend.sort(key=lambda item: (item[0], item[1], item[2]))
 
-    for name in app_features + app_core:
+    selected_backend: List[Tuple[int, str, str]] = []
+    for name in backend_groups:
+        priority, label = classify_backend_group(name)
+        selected_backend.append((priority, label, name))
+    selected_backend.sort(key=lambda item: (item[0], item[1], item[2]))
+
+    frontend_node_ids_by_label: Dict[str, str] = {}
+    for priority, label, name in selected_frontend[:4]:
         node_id = 'mod_app_' + mermaid_safe_id(name)
-        add_node(node_id, app_module_label(name))
+        frontend_node_ids_by_label[label] = node_id
+        add_node(node_id, label)
         add_edge('app_surface', node_id, 'group')
 
-    for name in backend_modules:
+    for _priority, label, name in selected_backend[:3]:
         node_id = 'mod_backend_' + mermaid_safe_id(name)
-        add_node(node_id, backend_module_label(name))
+        add_node(node_id, label)
         add_edge('backend_surface', node_id, 'group')
 
     ranked_route_hints = sorted(
@@ -1119,7 +1178,7 @@ def render_architecture_mermaid(
         if len(seen_route_paths) >= 2:
             break
 
-    spine_candidates = []
+    spine_candidates: List[Tuple[int, str]] = []
     for file_path in runtime_file_order:
         lower = file_path.lower()
         priority = 99
@@ -1135,26 +1194,43 @@ def render_architecture_mermaid(
     spine_candidates.sort()
     spine_files = [file_path for _priority, file_path in spine_candidates[:4]]
 
-    prev_spine = 'backend_entry' if backend_entry else 'backend_surface'
+    prev_spine = 'backend_entry' if backend_entry and has_backend else 'backend_surface'
     for file_path in spine_files:
         flow_id = 'flow_' + mermaid_safe_id(file_path)
         add_node(flow_id, runtime_label(file_path))
         add_edge(prev_spine, flow_id, 'spine')
         prev_spine = flow_id
 
+    if has_frontend and not route_flow_hints:
+        frontend_story_order = ['app router', 'route pages', 'route modules', 'feature screens', 'UI components', 'hooks / state', 'state store', 'vue composables', 'shared client core']
+        prev_front = 'app_entry' if flutter_entry else 'app_surface'
+        seen_front_story: Set[str] = set()
+        for label in frontend_story_order:
+            node_id = frontend_node_ids_by_label.get(label)
+            if not node_id or node_id in seen_front_story:
+                continue
+            seen_front_story.add(node_id)
+            add_edge(prev_front, node_id, 'spine')
+            prev_front = node_id
+
     preferred_app_links = []
     preferred_backend_links = []
     for file_path, hints in sorted(gateway_hints.items()):
         lower = file_path.lower()
-        if any(token in lower for token in ('cloud_adapter_mobile', 'cloud_adapter_web', 'lan_discovery_mobile', 'lan_discovery_web')):
+        if any(token in lower for token in ('cloud_adapter_mobile', 'cloud_adapter_web', 'lan_discovery_mobile', 'lan_discovery_web', 'client', 'adapter')):
             preferred_app_links.append((file_path, hints))
-        elif any(token in lower for token in ('transfer.gateway', 'peer.gateway')):
+        elif any(token in lower for token in ('transfer.gateway', 'peer.gateway', 'socket', 'ws')):
             preferred_backend_links.append((file_path, hints))
 
     for file_path, hints in preferred_app_links[:2]:
         gw_id = 'gw_app_' + mermaid_safe_id(file_path)
         add_node(gw_id, runtime_label(file_path))
-        add_edge('app_surface', gw_id, 'network')
+        anchor = 'app_surface'
+        if 'hooks / state' in frontend_node_ids_by_label:
+            anchor = frontend_node_ids_by_label['hooks / state']
+        elif 'shared client core' in frontend_node_ids_by_label:
+            anchor = frontend_node_ids_by_label['shared client core']
+        add_edge(anchor, gw_id, 'network')
         meaningful = [h for h in hints if not h.startswith(('dart:', 'package:'))]
         meaningful = [h for h in meaningful if not any(t in h.lower() for t in ('content-type', 'content-disposition', 'x-drops-file-size'))]
         if meaningful:
@@ -1176,7 +1252,7 @@ def render_architecture_mermaid(
 
     lines.extend(node_defs)
     if app_defs:
-        lines.append('    subgraph APP["App / Client"]')
+        lines.append('    subgraph APP["Frontend / Client"]')
         lines.extend(app_defs)
         lines.append('    end')
     if backend_defs:
@@ -1184,7 +1260,8 @@ def render_architecture_mermaid(
         lines.extend(backend_defs)
         lines.append('    end')
     if flow_defs:
-        lines.append('    subgraph FLOW["Transfer runtime spine"]')
+        flow_title = 'Runtime spine' if not route_flow_hints else 'Route / runtime spine'
+        lines.append(f'    subgraph FLOW["{flow_title}"]')
         lines.extend(flow_defs)
         lines.append('    end')
 
