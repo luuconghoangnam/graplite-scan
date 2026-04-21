@@ -201,6 +201,7 @@ class ScipIndexStatus:
     definition_count: int
     reference_count: int
     structured_occurrence_hints: List[str]
+    structured_top_reference_hints: List[str]
 
 
 def is_ignored(path: Path, ignore_dirs: Set[str]) -> bool:
@@ -974,6 +975,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             definition_count=0,
             reference_count=0,
             structured_occurrence_hints=[],
+            structured_top_reference_hints=[],
         )
     if not index_path.exists() or not index_path.is_file():
         return ScipIndexStatus(
@@ -993,6 +995,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             definition_count=0,
             reference_count=0,
             structured_occurrence_hints=[],
+            structured_top_reference_hints=[],
         )
     try:
         stat = index_path.stat()
@@ -1012,7 +1015,9 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         definition_count = 0
         reference_count = 0
         structured_occurrence_hints: List[str] = []
+        structured_top_reference_hints: List[str] = []
         seen_occurrences: Set[str] = set()
+        occurrence_stats: Dict[str, Dict[str, Any]] = {}
 
         for field_no, wire_type, value in iter_fields(data):
             if field_no == 1 and wire_type == 2 and not tool_name:
@@ -1038,6 +1043,12 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                     else:
                         reference_count += 1
                     if relative_path and symbol:
+                        stat = occurrence_stats.setdefault(symbol, {'defs': 0, 'refs': 0, 'docs': set()})
+                        if is_definition:
+                            stat['defs'] += 1
+                        else:
+                            stat['refs'] += 1
+                        stat['docs'].add(relative_path)
                         occ_kind = 'def' if is_definition else 'ref'
                         occ_label = f'{relative_path} :: {symbol} [{occ_kind}]'
                         if occ_label not in seen_occurrences:
@@ -1057,6 +1068,16 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                 if cleaned and cleaned not in seen_symbols:
                     seen_symbols.add(cleaned)
                     symbol_hints.append(cleaned)
+        ranked_occurrence_stats = sorted(
+            occurrence_stats.items(),
+            key=lambda kv: (kv[1]['refs'], kv[1]['defs'], len(kv[1]['docs']), kv[0]),
+            reverse=True,
+        )
+        for symbol, stat in ranked_occurrence_stats[:10]:
+            structured_top_reference_hints.append(
+                f"{symbol} [refs={stat['refs']}, defs={stat['defs']}, docs={len(stat['docs'])}]"
+            )
+
         summary = [
             f'file exists at `{scip_readiness.index_path}`',
             f'size ≈ {stat.st_size} bytes',
@@ -1064,6 +1085,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             f'structured symbols: {len(structured_symbol_hints)}',
             f'structured occurrences: {occurrence_count}',
             f'structured defs/refs: {definition_count}/{reference_count}',
+            f'structured unique occurrence symbols: {len(occurrence_stats)}',
             f'printable document hints: {len(document_hints)}',
             f'printable symbol hints: {len(symbol_hints)}',
         ]
@@ -1084,6 +1106,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             definition_count=definition_count,
             reference_count=reference_count,
             structured_occurrence_hints=structured_occurrence_hints,
+            structured_top_reference_hints=structured_top_reference_hints,
         )
     except Exception as err:
         return ScipIndexStatus(
@@ -1103,6 +1126,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             definition_count=0,
             reference_count=0,
             structured_occurrence_hints=[],
+            structured_top_reference_hints=[],
         )
 
 
@@ -1317,6 +1341,10 @@ def render_fast_map(
     if scip_index_status.structured_occurrence_hints:
         lines.append("- Structured occurrence hints:")
         for item in scip_index_status.structured_occurrence_hints[:8]:
+            lines.append(f"  - `{item}`")
+    if scip_index_status.structured_top_reference_hints:
+        lines.append("- Top referenced structured symbols:")
+        for item in scip_index_status.structured_top_reference_hints[:8]:
             lines.append(f"  - `{item}`")
     if scip_index_status.document_hints:
         lines.append("- SCIP document hints:")
@@ -1721,6 +1749,8 @@ def render_blast_map(
         lines.append(f"- Structured symbols: {', '.join(f'`{x}`' for x in scip_index_status.structured_symbol_hints[:4])}")
     if scip_index_status.structured_occurrence_hints:
         lines.append(f"- Structured occurrences: {', '.join(f'`{x}`' for x in scip_index_status.structured_occurrence_hints[:4])}")
+    if scip_index_status.structured_top_reference_hints:
+        lines.append(f"- Top referenced structured symbols: {', '.join(f'`{x}`' for x in scip_index_status.structured_top_reference_hints[:4])}")
     elif scip_index_status.document_hints:
         lines.append(f"- Example indexed docs: {', '.join(f'`{x}`' for x in scip_index_status.document_hints[:5])}")
     if scip_index_status.symbol_hints:
