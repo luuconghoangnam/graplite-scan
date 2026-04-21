@@ -1566,6 +1566,14 @@ def build_changed_range_semantic_context(
     return changed_aliases, changed_name_aliases, changed_range_name_aliases, changed_range_scip_aliases
 
 
+def format_scip_range_candidate(candidate: ScipRangeCandidate, full_label: str) -> str:
+    matched_names_suffix = ''
+    if candidate.matched_names:
+        matched_names_suffix = f" [matched: {', '.join(candidate.matched_names[:3])}]"
+    distance_suffix = '' if candidate.distance is None else f" [distance: {candidate.distance}]"
+    return full_label + matched_names_suffix + distance_suffix
+
+
 def collect_route_boost_reasons(
     hint: RouteFlowHint,
     changed_aliases: Set[str],
@@ -1601,7 +1609,8 @@ def collect_route_boost_reasons(
                 (candidate for candidate in range_scip_candidates if any(keyword in candidate.symbol.lower() for keyword in route_keywords)),
                 range_scip_candidates[0],
             )
-            text = f"changed range matched SCIP candidate `{impacted_file} :: {matched_candidate.symbol}`"
+            candidate_text = format_scip_range_candidate(matched_candidate, f'{impacted_file} :: {matched_candidate.symbol}')
+            text = f"changed range matched SCIP candidate `{candidate_text}`"
             if text not in seen:
                 seen.add(text)
                 reasons.append(text)
@@ -2350,11 +2359,7 @@ def render_blast_map(
                             range_symbol_labels.append(full_label)
                         if full_label not in seen_range_scip_candidate_labels:
                             seen_range_scip_candidate_labels.add(full_label)
-                            matched_names_suffix = ''
-                            if candidate.matched_names:
-                                matched_names_suffix = f" [matched: {', '.join(candidate.matched_names[:3])}]"
-                            distance_suffix = '' if candidate.distance is None else f" [distance: {candidate.distance}]"
-                            range_scip_candidate_labels.append(full_label + matched_names_suffix + distance_suffix)
+                            range_scip_candidate_labels.append(format_scip_range_candidate(candidate, full_label))
                     candidate_symbols = scip_symbols_by_file.get(alias, [])
                     prioritized_symbols = []
                     fallback_symbols = []
