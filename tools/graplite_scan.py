@@ -1300,6 +1300,34 @@ def extract_symbol_name_from_label(label: str) -> str:
     return core.strip()
 
 
+def extract_route_keywords_from_steps(steps: List[str]) -> List[str]:
+    keywords: List[str] = []
+    for step in steps:
+        for m in re.finditer(r'`([A-Za-z_][A-Za-z0-9_]*)\(\)`', step):
+            keywords.append(m.group(1))
+        for m in re.finditer(r'via `([^`]+)`', step):
+            parts = [p.strip() for p in m.group(1).split(',')]
+            for part in parts:
+                if part:
+                    keywords.append(part)
+    return keywords
+
+
+def match_scip_symbols_for_names(file_path: str, names: List[str], scip_symbols_by_file: Dict[str, List[str]]) -> List[str]:
+    if not names:
+        return []
+    matched: List[str] = []
+    seen: Set[str] = set()
+    lower_names = [name.lower() for name in names if name]
+    for symbol in scip_symbols_by_file.get(file_path, []):
+        lower_symbol = symbol.lower()
+        if any(name in lower_symbol for name in lower_names):
+            if symbol not in seen:
+                seen.add(symbol)
+                matched.append(symbol)
+    return matched[:8]
+
+
 def collect_route_boost_reasons(
     hint: RouteFlowHint,
     changed_aliases: Set[str],
@@ -1314,25 +1342,9 @@ def collect_route_boost_reasons(
             if file_path not in impacted_files:
                 impacted_files.append(file_path)
 
-    route_keywords: Set[str] = set()
-    for step in hint.chain:
-        for m in re.finditer(r'`([A-Za-z_][A-Za-z0-9_]*)\(\)`', step):
-            route_keywords.add(m.group(1).lower())
-        for m in re.finditer(r'via `([^`]+)`', step):
-            parts = [p.strip() for p in m.group(1).split(',')]
-            for part in parts:
-                if part:
-                    route_keywords.add(part.lower())
-
+    route_keywords = {kw.lower() for kw in extract_route_keywords_from_steps(hint.chain)}
     reasons: List[str] = []
     seen: Set[str] = set()
-
-    touched_files = [file_path for file_path in impacted_files if file_path in changed_aliases]
-    if touched_files:
-        text = f"touched files: {', '.join(f'`{item}`' for item in touched_files[:4])}"
-        if text not in seen:
-            seen.add(text)
-            reasons.append(text)
 
     for impacted_file in impacted_files:
         range_names = changed_range_name_aliases.get(impacted_file, [])
@@ -1344,17 +1356,22 @@ def collect_route_boost_reasons(
                     seen.add(text)
                     reasons.append(text)
 
+            matched_scip = match_scip_symbols_for_names(impacted_file, range_names, scip_symbols_by_file)
+            if matched_scip:
+                text = f"range-aligned SCIP symbol `{impacted_file} :: {matched_scip[0]}`"
+                if text not in seen:
+                    seen.add(text)
+                    reasons.append(text)
+
         candidate_names = changed_name_aliases.get(impacted_file, [])
         if candidate_names:
-            for symbol in scip_symbols_by_file.get(impacted_file, []):
-                lower_symbol = symbol.lower()
-                matched_names = [name for name in candidate_names if name.lower() in lower_symbol]
-                if matched_names:
-                    text = f"heuristic diff symbol `{matched_names[0]}` matched `{impacted_file} :: {symbol}`"
-                    if text not in seen:
-                        seen.add(text)
-                        reasons.append(text)
-                    break
+            matched_scip = match_scip_symbols_for_names(impacted_file, candidate_names, scip_symbols_by_file)
+            if matched_scip:
+                matched_name = next((name for name in candidate_names if name.lower() in matched_scip[0].lower()), candidate_names[0])
+                text = f"heuristic diff symbol `{matched_name}` matched `{impacted_file} :: {matched_scip[0]}`"
+                if text not in seen:
+                    seen.add(text)
+                    reasons.append(text)
 
     return reasons[:4]
 
@@ -1626,20 +1643,8 @@ def render_blast_map(
             return True
         return False
 
-    def extract_route_keywords(chain: List[str]) -> List[str]:
-        keywords: List[str] = []
-        for step in chain:
-            for m in re.finditer(r'`([A-Za-z_][A-Za-z0-9_]*)\(\)`', step):
-                keywords.append(m.group(1))
-            for m in re.finditer(r'via `([^`]+)`', step):
-                parts = [p.strip() for p in m.group(1).split(',')]
-                for part in parts:
-                    if part:
-                        keywords.append(part)
-        return keywords
-
     def rank_route_symbols(impacted: List[str], chain: List[str]) -> List[str]:
-        keywords = extract_route_keywords(chain)
+        keywords = extract_route_keywords_from_steps(chain)
         keyword_set = {kw.lower() for kw in keywords}
         service_keywords = {kw.lower() for kw in keywords if kw and kw[0].islower()}
         strong_route_terms = {
@@ -1959,7 +1964,7 @@ def render_blast_map(
             symbol_hits = 0
             range_symbol_hits = 0
             impacted_files: List[str] = []
-            route_keywords = {kw.lower() for kw in extract_route_keywords(hint.chain)}
+            route_keywords = {kw.lower() for kw in extract_route_keywords_from_steps(hint.chain)}
             for step in hint.chain:
                 for file_match in re.findall(r'`([^`]+\.(?:ts|js|dart)(?::\d+)?)`', step):
                     file_path = file_match.split(':', 1)[0]
@@ -2064,14 +2069,23 @@ def render_blast_map(
                         normalized_changed_files.append(alias)
                     nearest_labels = nearest_symbol_defs_for_ranges(alias, raw_ranges, symbol_defs_by_file)
                     nearest_names = [extract_symbol_name_from_label(label).lower() for label in nearest_labels]
+                    matched_range_scip_symbols = match_scip_symbols_for_names(alias, [extract_symbol_name_from_label(label) for label in nearest_labels], scip_symbols_by_file)
                     for route in file_to_routes.get(alias, []):
                         matched_route_scores[route] += 1
-                        route_keywords = {kw.lower() for kw in extract_route_keywords(route_to_steps.get(route, []))}
+                        route_keywords = {kw.lower() for kw in extract_route_keywords_from_steps(route_to_steps.get(route, []))}
                         for nearest_name in nearest_names:
                             if nearest_name and nearest_name in route_keywords:
                                 matched_route_scores[route] += 3
+                        for symbol in matched_range_scip_symbols:
+                            if any(keyword in symbol.lower() for keyword in route_keywords):
+                                matched_route_scores[route] += 2
                     for nearest_label in nearest_labels:
                         full_label = f'{alias} :: {nearest_label}'
+                        if full_label not in seen_range_symbol_labels:
+                            seen_range_symbol_labels.add(full_label)
+                            range_symbol_labels.append(full_label)
+                    for symbol in matched_range_scip_symbols:
+                        full_label = f'{alias} :: {symbol}'
                         if full_label not in seen_range_symbol_labels:
                             seen_range_symbol_labels.add(full_label)
                             range_symbol_labels.append(full_label)
