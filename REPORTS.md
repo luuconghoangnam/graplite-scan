@@ -23,7 +23,7 @@ Definition of Done:
 - [ ] Start executing roadmap slices with one commit per completed sub-task
 
 ### Phase W1 — Web app excellence track
-Status: RECEIVED
+Status: RUNNING
 Owner: Coonie
 
 Target outcome:
@@ -32,13 +32,13 @@ Target outcome:
 Planned thin slices:
 - [x] Better frontend entry detection
 - [x] Better app-router companion file awareness (`layout` / `template` / `loading` / `error` / `not-found` / `providers`)
-- [ ] Route-segment chain understanding (same-segment grouping + parent shell influence)
-- [ ] Better shared state/provider/context blast radius
+- [x] Route-segment chain understanding (same-segment grouping + parent shell influence)
+- [x] Better shared state/provider/context blast radius
 - [ ] Framework-aware wording + regression fixtures
 - [ ] Benchmark against 3–5 real web repos
 
 ### Phase D1 — C# desktop reliability track
-Status: RECEIVED
+Status: RUNNING
 Owner: Coonie
 
 Target outcome:
@@ -49,7 +49,7 @@ Planned thin slices:
 - [x] View ↔ ViewModel ↔ Command heuristic pass
 - [x] `DataContext`, `vm:`, relay/delegate command patterns
 - [x] `InitializeComponent` / `ICommand` property hints
-- [ ] Better `ICommand` binding resolution across XAML ↔ code-behind ↔ ViewModel
+- [x] Better `ICommand` binding resolution across XAML ↔ code-behind ↔ ViewModel
 - [ ] ViewModelLocator / resource-dictionary / static resource hints
 - [ ] Constructor/service injection confidence improvements
 - [ ] Benchmark against 2–3 real desktop repos
@@ -75,12 +75,17 @@ Notes:
 ### [R1-T3] Begin roadmap execution with one-commit-per-slice discipline
 Status: RUNNING
 Notes:
-- Latest completed implementation slices before roadmap formalization:
+- Completed reference-roadmap execution slices:
   - `765ce79` — `feat: deepen desktop and web app heuristics`
   - `cd83027` — `feat: improve app-router and desktop command heuristics`
+  - `579058c` — `docs: add reference-driven roadmap`
+  - `b9b5987` — `feat: add route segment companion awareness`
+  - `363d3d8` — `feat: improve desktop command binding correlation`
+  - `47b7140` — `feat: refine provider and context blast radius`
+- Benchmarking substrate now added in `docs/BENCHMARK_MATRIX.md`
 - Next recommended slice:
-  - Web: route-segment chain awareness
-  - Desktop: stronger `ICommand` binding correlation
+  - Pick concrete candidate repos for web / backend / desktop / Flutter benchmarks
+  - Write expected observations for each chosen repo
 
 ## Reference Repo Assessment
 
@@ -138,8 +143,8 @@ A slice is only DONE when:
 
 ## Next Suggested Implementation Order
 
-1. Web route-segment chain awareness
-2. Desktop `ICommand`/binding correlation improvement
-3. Real benchmark fixtures + expected-output checks
+1. Pick concrete benchmark candidates across web / backend / desktop / Flutter
+2. Write expected observations and anti-noise checks for each candidate
+3. Framework-aware wording + regression fixtures
 4. Internal normalized graph shape for cross-feature reuse
 5. Selective semantic deepening where heuristics plateau
