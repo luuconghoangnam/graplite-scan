@@ -753,10 +753,22 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             out.append(''.join(cur))
         return out
 
-    def clean_symbol_hint(raw: str) -> str:
+    def normalize_symbol_hint(raw: str) -> Optional[str]:
         raw = raw.strip()
         raw = re.sub(r'^[^a-zA-Z]+', '', raw)
-        return raw
+        match = re.search(r'(src/[A-Za-z0-9_./\-]+/`?[A-Za-z0-9_.\-]+\.ts`?)/([^\s]+)$', raw)
+        if not match:
+            return None
+        path = match.group(1).replace('`', '')
+        symbol = match.group(2)
+        symbol = symbol.replace('`', '')
+        symbol = re.sub(r'\([^)]*\)', '()', symbol)
+        symbol = symbol.replace('.()', '()')
+        symbol = re.sub(r'\.+$', '', symbol)
+        symbol = symbol.strip('/ ')
+        if not symbol or symbol in {'local', 'export'}:
+            return None
+        return f'{path} :: {symbol}'
 
     index_path = repo / scip_readiness.index_path
     if not scip_readiness.enabled:
@@ -791,8 +803,8 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                 if path not in seen_docs:
                     seen_docs.add(path)
                     document_hints.append(path)
-            if 'scip-typescript npm' in s and '/`' in s:
-                cleaned = clean_symbol_hint(s)
+            if 'scip-typescript npm' in s and 'src/' in s:
+                cleaned = normalize_symbol_hint(s)
                 if cleaned and cleaned not in seen_symbols:
                     seen_symbols.add(cleaned)
                     symbol_hints.append(cleaned)
