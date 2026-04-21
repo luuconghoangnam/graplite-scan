@@ -197,6 +197,10 @@ class ScipIndexStatus:
     document_count: int
     structured_document_hints: List[str]
     structured_symbol_hints: List[str]
+    occurrence_count: int
+    definition_count: int
+    reference_count: int
+    structured_occurrence_hints: List[str]
 
 
 def is_ignored(path: Path, ignore_dirs: Set[str]) -> bool:
@@ -905,10 +909,26 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             return None
         return tail
 
-    def parse_document(buf: bytes) -> Tuple[str, str, List[str]]:
+    def parse_occurrence(buf: bytes) -> Tuple[Optional[str], bool]:
+        symbol_text = ''
+        symbol_roles = 0
+        for field_no, wire_type, value in iter_fields(buf):
+            if field_no == 4 and wire_type == 2:
+                symbol_text = decode_utf8(value)
+            elif field_no == 5 and wire_type == 0:
+                try:
+                    symbol_roles = int(decode_utf8(value))
+                except ValueError:
+                    symbol_roles = 0
+        normalized = normalize_structured_symbol(symbol_text, '') if symbol_text else None
+        is_definition = bool(symbol_roles & 0x1)
+        return normalized, is_definition
+
+    def parse_document(buf: bytes) -> Tuple[str, str, List[str], List[Tuple[str, bool]]]:
         relative_path = ''
         language = ''
         symbols: List[str] = []
+        occurrences: List[Tuple[str, bool]] = []
         for field_no, wire_type, value in iter_fields(buf):
             if wire_type != 2:
                 continue
@@ -916,6 +936,10 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                 relative_path = decode_utf8(value)
             elif field_no == 4:
                 language = decode_utf8(value)
+            elif field_no == 2:
+                normalized_occurrence, is_definition = parse_occurrence(value)
+                if normalized_occurrence:
+                    occurrences.append((normalized_occurrence, is_definition))
             elif field_no == 3:
                 symbol_text = ''
                 display_name = ''
@@ -929,7 +953,7 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                 normalized = normalize_structured_symbol(symbol_text, display_name)
                 if normalized:
                     symbols.append(normalized)
-        return relative_path, language, symbols
+        return relative_path, language, symbols, occurrences
 
     index_path = repo / scip_readiness.index_path
     if not scip_readiness.enabled:
@@ -946,6 +970,10 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             document_count=0,
             structured_document_hints=[],
             structured_symbol_hints=[],
+            occurrence_count=0,
+            definition_count=0,
+            reference_count=0,
+            structured_occurrence_hints=[],
         )
     if not index_path.exists() or not index_path.is_file():
         return ScipIndexStatus(
@@ -961,6 +989,10 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             document_count=0,
             structured_document_hints=[],
             structured_symbol_hints=[],
+            occurrence_count=0,
+            definition_count=0,
+            reference_count=0,
+            structured_occurrence_hints=[],
         )
     try:
         stat = index_path.stat()
@@ -976,13 +1008,18 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
         tool_version = ''
         project_root = ''
         document_count = 0
+        occurrence_count = 0
+        definition_count = 0
+        reference_count = 0
+        structured_occurrence_hints: List[str] = []
+        seen_occurrences: Set[str] = set()
 
         for field_no, wire_type, value in iter_fields(data):
             if field_no == 1 and wire_type == 2 and not tool_name:
                 tool_name, tool_version, project_root = parse_metadata(value)
             elif field_no == 2 and wire_type == 2:
                 document_count += 1
-                relative_path, language, symbols = parse_document(value)
+                relative_path, language, symbols, occurrences = parse_document(value)
                 if relative_path:
                     doc_label = relative_path if not language else f'{relative_path} ({language})'
                     if doc_label not in seen_docs:
@@ -994,6 +1031,18 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                         if symbol_label not in seen_symbols:
                             seen_symbols.add(symbol_label)
                             structured_symbol_hints.append(symbol_label)
+                for symbol, is_definition in occurrences:
+                    occurrence_count += 1
+                    if is_definition:
+                        definition_count += 1
+                    else:
+                        reference_count += 1
+                    if relative_path and symbol:
+                        occ_kind = 'def' if is_definition else 'ref'
+                        occ_label = f'{relative_path} :: {symbol} [{occ_kind}]'
+                        if occ_label not in seen_occurrences:
+                            seen_occurrences.add(occ_label)
+                            structured_occurrence_hints.append(occ_label)
 
         seen_docs.clear()
         seen_symbols.clear()
@@ -1013,6 +1062,8 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             f'size ≈ {stat.st_size} bytes',
             f'structured documents: {document_count}',
             f'structured symbols: {len(structured_symbol_hints)}',
+            f'structured occurrences: {occurrence_count}',
+            f'structured defs/refs: {definition_count}/{reference_count}',
             f'printable document hints: {len(document_hints)}',
             f'printable symbol hints: {len(symbol_hints)}',
         ]
@@ -1029,6 +1080,10 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             document_count=document_count,
             structured_document_hints=structured_document_hints,
             structured_symbol_hints=structured_symbol_hints,
+            occurrence_count=occurrence_count,
+            definition_count=definition_count,
+            reference_count=reference_count,
+            structured_occurrence_hints=structured_occurrence_hints,
         )
     except Exception as err:
         return ScipIndexStatus(
@@ -1044,6 +1099,10 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
             document_count=0,
             structured_document_hints=[],
             structured_symbol_hints=[],
+            occurrence_count=0,
+            definition_count=0,
+            reference_count=0,
+            structured_occurrence_hints=[],
         )
 
 
@@ -1254,6 +1313,10 @@ def render_fast_map(
     if scip_index_status.structured_symbol_hints:
         lines.append("- Structured symbol hints:")
         for item in scip_index_status.structured_symbol_hints[:8]:
+            lines.append(f"  - `{item}`")
+    if scip_index_status.structured_occurrence_hints:
+        lines.append("- Structured occurrence hints:")
+        for item in scip_index_status.structured_occurrence_hints[:8]:
             lines.append(f"  - `{item}`")
     if scip_index_status.document_hints:
         lines.append("- SCIP document hints:")
@@ -1656,6 +1719,8 @@ def render_blast_map(
         lines.append(f"- Structured docs: {', '.join(f'`{x}`' for x in scip_index_status.structured_document_hints[:5])}")
     if scip_index_status.structured_symbol_hints:
         lines.append(f"- Structured symbols: {', '.join(f'`{x}`' for x in scip_index_status.structured_symbol_hints[:4])}")
+    if scip_index_status.structured_occurrence_hints:
+        lines.append(f"- Structured occurrences: {', '.join(f'`{x}`' for x in scip_index_status.structured_occurrence_hints[:4])}")
     elif scip_index_status.document_hints:
         lines.append(f"- Example indexed docs: {', '.join(f'`{x}`' for x in scip_index_status.document_hints[:5])}")
     if scip_index_status.symbol_hints:
