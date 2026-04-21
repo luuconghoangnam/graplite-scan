@@ -1170,24 +1170,36 @@ def render_blast_map(
                             score += 30
                         if any(t in lower_symbol for t in ('createsessionresult', 'transfersession', 'pairingcode')):
                             score += 16
-                        if any(t in lower_symbol for t in ('transfermetadata', 'transferfiledescriptor')):
-                            score += 4
+                        if 'transferfiledescriptor' in lower_symbol:
+                            score -= 10
+                        if 'transfermetadata' in lower_symbol:
+                            score -= 2
                     if 'attachreceiver' in service_keywords:
                         if 'attachreceiver' in lower_symbol:
                             score += 30
                         if any(t in lower_symbol for t in ('receiver', 'transfersession', 'pairingcode')):
                             score += 14
-                        if any(t in lower_symbol for t in ('transfermetadata', 'transferfiledescriptor')):
-                            score -= 2
+                        if 'transferfiledescriptor' in lower_symbol:
+                            score -= 12
+                        if 'transfermetadata' in lower_symbol:
+                            score -= 4
                     if 'completesession' in service_keywords:
                         if 'completesession' in lower_symbol:
                             score += 28
                         if any(t in lower_symbol for t in ('getcompletionflags', 'sendercompleted', 'receivercompleted', 'transfersession')):
                             score += 14
+                        if 'transferfiledescriptor' in lower_symbol:
+                            score -= 10
                     if 'getsession' in service_keywords and ('getsession' in lower_symbol or 'transfersession' in lower_symbol):
                         score += 12
                     if 'touchsession' in service_keywords and ('touchsession' in lower_symbol or 'lastactivity' in lower_symbol):
                         score += 10
+                    if 'getchunkuploadurl' in service_keywords and 'transferfiledescriptor' in lower_symbol:
+                        score += 10
+                    if 'getchunkdownloadurl' in service_keywords and 'transferfiledescriptor' in lower_symbol:
+                        score += 8
+                    if 'deletechunk' in service_keywords and 'transferfiledescriptor' in lower_symbol:
+                        score += 6
                     if container_name in {'transferservice', 'createsessionresult'}:
                         score += 6
 
