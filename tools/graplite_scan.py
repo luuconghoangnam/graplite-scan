@@ -3205,11 +3205,10 @@ def render_blast_map(
         rows: List[Tuple[int, str, Optional[str], List[str], List[str], List[str], List[str]]] = []
         seen_views: Set[str] = set()
         candidate_pool = set(edges.keys()) | set(reverse_edges.keys())
-        if not candidate_pool:
-            for suffix in ('*.xaml', '*.xaml.cs', '*ViewModel.cs', '*Service.cs', '*Command.cs'):
-                for p in repo.rglob(suffix):
-                    rel = relpath_posix(p, repo)
-                    candidate_pool.add(rel)
+        for suffix in ('*.xaml', '*.xaml.cs', '*ViewModel.cs', '*Service.cs', '*Command.cs'):
+            for p in repo.rglob(suffix):
+                rel = relpath_posix(p, repo)
+                candidate_pool.add(rel)
         candidate_views = sorted(
             path for path in candidate_pool
             if path.lower().endswith(('.xaml', '.xaml.cs')) and any(part in path for part in ('Views/', 'Controls/', 'MainWindow.xaml', 'App.xaml', 'Page.xaml', 'Shell.xaml', 'AppShell.xaml'))
@@ -3222,18 +3221,27 @@ def render_blast_map(
             txt = safe_read_text(repo / canonical_view)
             deps = sorted(edges.get(canonical_view, set()) | edges.get(canonical_view + '.cs', set()))
             consumers = sorted(reverse_edges.get(canonical_view, []) + reverse_edges.get(canonical_view + '.cs', []))
-            all_candidates = set(edges.keys()) | set(reverse_edges.keys())
+            all_candidates = set(candidate_pool)
 
             def append_matches(bucket: List[str], names: Iterable[str], hints: Sequence[str]) -> None:
                 for raw_name in names:
                     name = raw_name.split('.')[-1].lower().replace('model', 'viewmodel')
                     if not name:
                         continue
+                    variants = [name]
+                    for suffix in ('viewmodel', 'service', 'command'):
+                        if name.endswith(suffix):
+                            trimmed = name[:-len(suffix)]
+                            if trimmed:
+                                variants.append(trimmed)
                     for candidate in all_candidates:
                         lower_candidate = candidate.lower()
                         if not lower_candidate.endswith('.cs'):
                             continue
-                        if any(hint in lower_candidate for hint in hints) or name in lower_candidate:
+                        candidate_stem = Path(lower_candidate).stem.lower()
+                        name_match = any(variant and (variant in candidate_stem or variant in lower_candidate) for variant in variants)
+                        hint_match = any(hint in lower_candidate for hint in hints)
+                        if name_match or (hint_match and any(variant and variant in lower_candidate for variant in variants)):
                             if candidate not in bucket:
                                 bucket.append(candidate)
 
@@ -3258,6 +3266,14 @@ def render_blast_map(
             control_links = [dep for dep in deps if '/Controls/' in dep or dep.endswith('.xaml') and '/Views/' not in dep]
             append_matches(vm_links, (m.group('name') for m in XAML_DATACONTEXT_RE.finditer(txt)), ('/viewmodels/', 'viewmodel'))
             append_matches(vm_links, (m.group('name') for m in XAML_VM_TYPE_RE.finditer(txt) if m.group('prefix').lower() in {'vm', 'viewmodels', 'viewmodel'}), ('/viewmodels/', 'viewmodel'))
+            view_stem = Path(canonical_view).stem.replace('.xaml', '')
+            if view_stem:
+                sibling_vm_name = f"{view_stem}ViewModel.cs".lower()
+                for candidate in all_candidates:
+                    lower_candidate = candidate.lower()
+                    if lower_candidate.endswith(sibling_vm_name) and ('/viewmodels/' in lower_candidate or lower_candidate.endswith('viewmodel.cs')):
+                        if candidate not in vm_links:
+                            vm_links.append(candidate)
             xaml_command_names = [m.group('name') for m in XAML_COMMAND_RE.finditer(txt)]
             append_matches(command_links, xaml_command_names, ('/commands/', 'command'))
             append_files_containing(vm_links, xaml_command_names, [candidate for candidate in all_candidates if '/ViewModels/' in candidate or candidate.endswith('ViewModel.cs')])
