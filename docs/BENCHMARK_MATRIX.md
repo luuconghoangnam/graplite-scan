@@ -401,13 +401,17 @@ Anti-noise checks:
 - First miss observed: large sample repo is recognized structurally in the tree, but architecture summary stays too conservative and does not yet elevate desktop/MVVM shape strongly enough.
 - Fix applied: add structural desktop fallback impact for repos where import-graph evidence is sparse but `.xaml` / `Views` / `Controls` / shell surfaces are clearly present.
 - Result after fix: `IMPACT.md` now emits useful desktop flow entries (for controls, app shells, and key pages) instead of staying empty.
+- Second fix applied: architecture summary now recognizes nested desktop sample roots under `samples/` when they expose MVVM or shell markers.
+- Result after second fix: `MAP.md` now summarizes the repo as a desktop sample corpus instead of defaulting to “No high-confidence architecture summary detected yet.”
 - Likely next fix area: improve nested `Views` → `ViewModels` correlation when sample repos place MVVM layers under multiple app roots.
 
 ### `flutter-samples`
 - First miss observed: scanner inventories the repo correctly, but architecture summary is too timid for a sample corpus and does not distinguish app-shaped Flutter subprojects from repo-level sample collection shape.
 - Fix applied: add structural app-sample fallback impact for Flutter sample corpora, so app-shaped subprojects with `lib/` + platform folders surface in `IMPACT.md` even without a strong repo-wide import graph.
 - Result after fix: `IMPACT.md` now highlights sample-level app surfaces such as `form_app/`, `navigation_and_routing/`, `material_3_demo/`, and `testing_app/`.
-- Likely next fix area: improve repo-level architecture wording so sample-corpus repos can summarize multiple meaningful app clusters without pretending they are one app.
+- Second fix applied: architecture summary now counts and names app-shaped Flutter sample roots at repo level.
+- Result after second fix: `MAP.md` now summarizes `flutter-samples` as a Flutter sample corpus with multiple app-shaped roots instead of leaving architecture summary blank.
+- Likely next fix area: rank the most representative sample roots so repo-level summaries mention stronger anchors before incidental samples.
 
 ## Lightweight benchmark run checklist
 

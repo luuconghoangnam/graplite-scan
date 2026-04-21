@@ -1118,8 +1118,29 @@ def architecture_summary_lines(
     )
     desktop_prefixes = ('Views/', 'ViewModels/', 'Controls/', 'Models/', 'Converters/', 'Commands/', 'Services/')
     app_groups = [name for name in module_names if name.startswith(frontend_prefixes)]
-    desktop_groups = [name for name in module_names if name.startswith(desktop_prefixes)]
+    desktop_groups = [
+        name for name in module_names
+        if name.startswith(desktop_prefixes) or any(token in name for token in ('/Views/', '/ViewModels/', '/Controls/', '/Models/', '/Converters/', '/Commands/', '/Services/'))
+    ]
     backend_groups = [name.split('/')[-1] for name in module_names if name.startswith(('backend/src/modules/', 'server/', 'services/', 'api/'))]
+
+    flutter_sample_roots: List[str] = []
+    desktop_sample_roots: List[str] = []
+    try:
+        for child in sorted(repo.iterdir()):
+            if not child.is_dir():
+                continue
+            if (child / 'lib').exists():
+                flutter_sample_roots.append(child.name)
+        samples_dir = repo / 'samples'
+        if samples_dir.exists() and samples_dir.is_dir():
+            for child in sorted(samples_dir.iterdir()):
+                if not child.is_dir():
+                    continue
+                if any((child / marker).exists() for marker in ('Views', 'ViewModels', 'Controls', 'Services', 'App.xaml', 'AppShell.xaml', 'Shell.xaml')):
+                    desktop_sample_roots.append(relpath_posix(child, repo).rstrip('/'))
+    except OSError:
+        pass
 
     def frontend_group_label(path: str) -> Optional[str]:
         normalized = path.rstrip('/')
@@ -1194,6 +1215,10 @@ def architecture_summary_lines(
             subsystem_bits.append("desktop app layers present")
     if 'ExtentionChrome' in top_names:
         subsystem_bits.append("browser extension surface present")
+    if flutter_sample_roots and not app_groups and not (top_names & frontend_roots):
+        subsystem_bits.append(f"Flutter sample apps present: {', '.join(f'`{name}`' for name in flutter_sample_roots[:6])}")
+    if desktop_sample_roots and not desktop_groups:
+        subsystem_bits.append(f"desktop sample apps present: {', '.join(f'`{name}`' for name in desktop_sample_roots[:6])}")
     if subsystem_bits:
         lines.append(f"- Main subsystems: {'; '.join(subsystem_bits)}")
 
@@ -1231,16 +1256,20 @@ def architecture_summary_lines(
         lines.append(f"- Detected route/flow coverage: {len(unique_routes)} route paths with chain hints across {len(flow_files)} source files")
     elif desktop_groups:
         desktop_surface_counts = {
-            'views': len([name for name in desktop_groups if name.startswith('Views/')]),
-            'viewmodels': len([name for name in desktop_groups if name.startswith('ViewModels/')]),
-            'controls': len([name for name in desktop_groups if name.startswith('Controls/')]),
-            'services': len([name for name in desktop_groups if name.startswith('Services/')]),
+            'views': len([name for name in desktop_groups if '/Views/' in name or name.startswith('Views/')]),
+            'viewmodels': len([name for name in desktop_groups if '/ViewModels/' in name or name.startswith('ViewModels/')]),
+            'controls': len([name for name in desktop_groups if '/Controls/' in name or name.startswith('Controls/')]),
+            'services': len([name for name in desktop_groups if '/Services/' in name or name.startswith('Services/')]),
         }
         summary_parts = [
             f"{count} {label}" for label, count in desktop_surface_counts.items() if count
         ]
         if summary_parts:
             lines.append(f"- Desktop flow coverage: {', '.join(summary_parts[:4])}")
+    elif flutter_sample_roots:
+        lines.append(f"- Flutter sample coverage: {len(flutter_sample_roots)} app-shaped sample roots detected")
+    elif desktop_sample_roots:
+        lines.append(f"- Desktop sample coverage: {len(desktop_sample_roots)} app/sample roots detected with MVVM or shell markers")
 
     gateway_files = list(gateway_hints.keys())
     if gateway_files:
