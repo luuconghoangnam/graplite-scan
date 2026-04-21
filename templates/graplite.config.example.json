@@ -4,5 +4,7 @@
   "fastFile": "MAP.md",
   "blastFile": "IMPACT.md",
   "outDir": "",
-  "diffRange": ""
+  "diffRange": "",
+  "ignoreDirs": [],
+  "ignorePaths": []
 }

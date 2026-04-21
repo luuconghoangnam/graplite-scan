@@ -235,8 +235,37 @@ class ScipIndexStatus:
     structured_occurrence_lines_by_file: Dict[str, Dict[str, List[int]]]
 
 
-def is_ignored(path: Path, ignore_dirs: Set[str]) -> bool:
-    return any(part in ignore_dirs for part in path.parts)
+def normalize_rel_prefix(value: str) -> str:
+    value = value.strip().replace('\\', '/').strip('/')
+    return value
+
+
+def should_ignore_rel(rel_posix: str, ignore_paths: Sequence[str]) -> bool:
+    for prefix in ignore_paths:
+        normalized = normalize_rel_prefix(prefix)
+        if not normalized:
+            continue
+        if rel_posix == normalized or rel_posix.startswith(normalized + '/'):
+            return True
+    return False
+
+
+def is_ignored(
+    path: Path,
+    ignore_dirs: Set[str],
+    root: Optional[Path] = None,
+    ignore_paths: Sequence[str] = (),
+) -> bool:
+    if any(part in ignore_dirs for part in path.parts):
+        return True
+    if root is not None:
+        try:
+            rel_posix = path.relative_to(root).as_posix()
+        except Exception:
+            rel_posix = ''
+        if rel_posix and should_ignore_rel(rel_posix, ignore_paths):
+            return True
+    return False
 
 
 def load_repo_config(repo: Path) -> Dict[str, Any]:
@@ -262,6 +291,19 @@ def config_bool(config: Dict[str, Any], key: str, default: bool = False) -> bool
     return value if isinstance(value, bool) else default
 
 
+def config_str_list(config: Dict[str, Any], key: str) -> List[str]:
+    value = config.get(key, [])
+    if not isinstance(value, list):
+        return []
+    out: List[str] = []
+    for item in value:
+        if isinstance(item, str):
+            normalized = item.strip()
+            if normalized:
+                out.append(normalized)
+    return out
+
+
 def safe_read_text(path: Path, max_bytes: int = 500_000) -> str:
     try:
         b = path.read_bytes()
@@ -276,7 +318,12 @@ def relpath_posix(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
-def list_tree(root: Path, max_depth: int = 3, ignore_dirs: Set[str] = DEFAULT_IGNORE_DIRS) -> List[str]:
+def list_tree(
+    root: Path,
+    max_depth: int = 3,
+    ignore_dirs: Set[str] = DEFAULT_IGNORE_DIRS,
+    ignore_paths: Sequence[str] = (),
+) -> List[str]:
     lines: List[str] = []
 
     def rec(cur: Path, depth: int, prefix: str = ""):
@@ -287,7 +334,7 @@ def list_tree(root: Path, max_depth: int = 3, ignore_dirs: Set[str] = DEFAULT_IG
         except Exception:
             return
         for it in items:
-            if it.name in ignore_dirs:
+            if is_ignored(it, ignore_dirs, root=root, ignore_paths=ignore_paths):
                 continue
             if it.is_dir():
                 lines.append(f"{prefix}{it.name}/")
@@ -299,10 +346,15 @@ def list_tree(root: Path, max_depth: int = 3, ignore_dirs: Set[str] = DEFAULT_IG
     return lines
 
 
-def find_manifests(root: Path, max_depth: int = 4, ignore_dirs: Set[str] = DEFAULT_IGNORE_DIRS) -> List[str]:
+def find_manifests(
+    root: Path,
+    max_depth: int = 4,
+    ignore_dirs: Set[str] = DEFAULT_IGNORE_DIRS,
+    ignore_paths: Sequence[str] = (),
+) -> List[str]:
     out: List[str] = []
     for p in root.rglob("*"):
-        if is_ignored(p, ignore_dirs):
+        if is_ignored(p, ignore_dirs, root=root, ignore_paths=ignore_paths):
             continue
         try:
             rel = p.relative_to(root)
@@ -375,7 +427,12 @@ def resolve_dart_import(spec: str, from_file: Path) -> Optional[Path]:
     return None
 
 
-def build_import_graph(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) -> Tuple[Dict[str, Set[str]], Dict[str, str]]:
+def build_import_graph(
+    repo: Path,
+    subdirs: Sequence[str],
+    ignore_dirs: Set[str],
+    ignore_paths: Sequence[str] = (),
+) -> Tuple[Dict[str, Set[str]], Dict[str, str]]:
     edges: Dict[str, Set[str]] = {}
     file_lang: Dict[str, str] = {}
 
@@ -384,7 +441,7 @@ def build_import_graph(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]
         if not base.exists():
             continue
         for p in base.rglob("*"):
-            if is_ignored(p, ignore_dirs) or not p.is_file():
+            if is_ignored(p, ignore_dirs, root=repo, ignore_paths=ignore_paths) or not p.is_file():
                 continue
             if p.suffix not in {".ts", ".js", ".dart", ".py"}:
                 continue
@@ -418,11 +475,17 @@ def build_import_graph(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]
     return edges, file_lang
 
 
-def extract_symbols(repo: Path, files: Iterable[str], file_lang: Dict[str, str], ignore_dirs: Set[str]) -> List[SymbolDef]:
+def extract_symbols(
+    repo: Path,
+    files: Iterable[str],
+    file_lang: Dict[str, str],
+    ignore_dirs: Set[str],
+    ignore_paths: Sequence[str] = (),
+) -> List[SymbolDef]:
     out: List[SymbolDef] = []
     for rel in files:
         p = repo / rel
-        if not p.exists() or not p.is_file() or is_ignored(p, ignore_dirs):
+        if not p.exists() or not p.is_file() or is_ignored(p, ignore_dirs, root=repo, ignore_paths=ignore_paths):
             continue
         txt = safe_read_text(p)
         lang = file_lang.get(rel)
@@ -454,7 +517,12 @@ def compute_degree_centrality(edges: Dict[str, Set[str]]) -> List[Tuple[str, int
     return ranked
 
 
-def extract_env_map(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) -> Tuple[List[str], List[str], List[str], List[str]]:
+def extract_env_map(
+    repo: Path,
+    subdirs: Sequence[str],
+    ignore_dirs: Set[str],
+    ignore_paths: Sequence[str] = (),
+) -> Tuple[List[str], List[str], List[str], List[str]]:
     used: Set[str] = set()
     declared: Set[str] = set()
 
@@ -483,7 +551,12 @@ def extract_env_map(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) -
     return used_list, declared_list, used_not_declared, declared_not_used
 
 
-def extract_routes(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) -> Tuple[List[RouteDef], List[RegisterCall]]:
+def extract_routes(
+    repo: Path,
+    subdirs: Sequence[str],
+    ignore_dirs: Set[str],
+    ignore_paths: Sequence[str] = (),
+) -> Tuple[List[RouteDef], List[RegisterCall]]:
     routes: List[RouteDef] = []
     regs: List[RegisterCall] = []
     for sub in subdirs:
@@ -504,7 +577,12 @@ def extract_routes(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) ->
     return routes, regs
 
 
-def extract_gateway_hints(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) -> Dict[str, List[str]]:
+def extract_gateway_hints(
+    repo: Path,
+    subdirs: Sequence[str],
+    ignore_dirs: Set[str],
+    ignore_paths: Sequence[str] = (),
+) -> Dict[str, List[str]]:
     out: Dict[str, List[str]] = {}
     for sub in subdirs:
         base = repo / sub
@@ -526,7 +604,12 @@ def extract_gateway_hints(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[s
     return out
 
 
-def extract_transfer_flow_hints(repo: Path, subdirs: Sequence[str], ignore_dirs: Set[str]) -> List[TransferFileHint]:
+def extract_transfer_flow_hints(
+    repo: Path,
+    subdirs: Sequence[str],
+    ignore_dirs: Set[str],
+    ignore_paths: Sequence[str] = (),
+) -> List[TransferFileHint]:
     hints: List[TransferFileHint] = []
     interesting_words = {
         'createSession', 'attachReceiver', 'completeSession', 'markSessionCanceled',
@@ -721,10 +804,10 @@ def file_dependency_details(edges: Dict[str, Set[str]], ranked: List[Tuple[str, 
     return details
 
 
-def top_level_summary(repo: Path, ignore_dirs: Set[str]) -> List[Tuple[str, str]]:
+def top_level_summary(repo: Path, ignore_dirs: Set[str], ignore_paths: Sequence[str] = ()) -> List[Tuple[str, str]]:
     summaries: List[Tuple[str, str]] = []
     for p in sorted(repo.iterdir(), key=lambda x: x.name.lower()):
-        if p.name in ignore_dirs:
+        if is_ignored(p, ignore_dirs, root=repo, ignore_paths=ignore_paths):
             continue
         if p.is_dir():
             desc = DIR_RESP_HINTS.get(p.name.lower(), 'directory')
@@ -732,18 +815,23 @@ def top_level_summary(repo: Path, ignore_dirs: Set[str]) -> List[Tuple[str, str]
     return summaries
 
 
-def nested_module_summary(repo: Path, roots: Sequence[str], ignore_dirs: Set[str]) -> List[Tuple[str, str]]:
+def nested_module_summary(
+    repo: Path,
+    roots: Sequence[str],
+    ignore_dirs: Set[str],
+    ignore_paths: Sequence[str] = (),
+) -> List[Tuple[str, str]]:
     out: List[Tuple[str, str]] = []
     for root in roots:
         base = repo / root
-        if not base.exists() or not base.is_dir():
+        if not base.exists() or not base.is_dir() or should_ignore_rel(root, ignore_paths):
             continue
         try:
             items = sorted(base.iterdir(), key=lambda p: p.name.lower())
         except Exception:
             continue
         for p in items:
-            if p.name in ignore_dirs:
+            if is_ignored(p, ignore_dirs, root=repo, ignore_paths=ignore_paths):
                 continue
             if not p.is_dir():
                 continue
@@ -2832,10 +2920,13 @@ def git_changed_symbol_names(repo: Path, diff_range: str) -> Tuple[Dict[str, Lis
 
 
 def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_range: str = '', profile: str = 'default') -> Tuple[Path, Path]:
+    repo_config = load_repo_config(repo)
     ignore_dirs = set(DEFAULT_IGNORE_DIRS)
-    scan_subdirs = detect_scan_subdirs(repo)
-    tree = list_tree(repo, max_depth=3, ignore_dirs=ignore_dirs)
-    manifests = find_manifests(repo, max_depth=4, ignore_dirs=ignore_dirs)
+    ignore_dirs.update(config_str_list(repo_config, 'ignoreDirs'))
+    ignore_paths = config_str_list(repo_config, 'ignorePaths')
+    scan_subdirs = [sub for sub in detect_scan_subdirs(repo) if not should_ignore_rel(sub, ignore_paths)]
+    tree = list_tree(repo, max_depth=3, ignore_dirs=ignore_dirs, ignore_paths=ignore_paths)
+    manifests = find_manifests(repo, max_depth=4, ignore_dirs=ignore_dirs, ignore_paths=ignore_paths)
 
     backend_entry = None
     for cand in ("backend/src/main.ts", "src/main.ts", "src/index.ts", "server/index.ts"):
@@ -2856,15 +2947,15 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
             if scripts:
                 scripts_map[rel] = scripts
 
-    edges, file_lang = build_import_graph(repo, scan_subdirs, ignore_dirs)
+    edges, file_lang = build_import_graph(repo, scan_subdirs, ignore_dirs, ignore_paths=ignore_paths)
     ranked_files = compute_degree_centrality(edges)
     files_for_symbols = list(file_lang.keys())
-    symbols = extract_symbols(repo, files_for_symbols, file_lang, ignore_dirs)
+    symbols = extract_symbols(repo, files_for_symbols, file_lang, ignore_dirs, ignore_paths=ignore_paths)
     symbol_scores = approx_symbol_scores(symbols, file_lang, repo) if symbols else {}
-    env_used, env_declared, env_used_not_declared, env_declared_not_used = extract_env_map(repo, scan_subdirs, ignore_dirs)
-    routes, regs = extract_routes(repo, scan_subdirs, ignore_dirs)
-    gateway_hints = extract_gateway_hints(repo, scan_subdirs, ignore_dirs)
-    transfer_flow_hints = extract_transfer_flow_hints(repo, scan_subdirs, ignore_dirs)
+    env_used, env_declared, env_used_not_declared, env_declared_not_used = extract_env_map(repo, scan_subdirs, ignore_dirs, ignore_paths=ignore_paths)
+    routes, regs = extract_routes(repo, scan_subdirs, ignore_dirs, ignore_paths=ignore_paths)
+    gateway_hints = extract_gateway_hints(repo, scan_subdirs, ignore_dirs, ignore_paths=ignore_paths)
+    transfer_flow_hints = extract_transfer_flow_hints(repo, scan_subdirs, ignore_dirs, ignore_paths=ignore_paths)
     route_flow_hints = extract_route_flow_hints(repo)
     scip_readiness = detect_scip_readiness(repo)
     scip_index_status = detect_scip_index_status(repo, scip_readiness)
@@ -2873,8 +2964,8 @@ def scan_repo(repo: Path, out_dir: Path, fast_name: str, blast_name: str, diff_r
     scip_occurrence_stats_by_file = group_structured_occurrence_stats_by_file(scip_index_status.structured_occurrence_stats_by_file)
     scip_occurrence_lines_by_file = group_structured_occurrence_lines_by_file(scip_index_status.structured_occurrence_lines_by_file)
     symbol_defs_by_file = group_symbol_defs_by_file(symbols)
-    top_summary = top_level_summary(repo, ignore_dirs)
-    module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs)
+    top_summary = top_level_summary(repo, ignore_dirs, ignore_paths=ignore_paths)
+    module_summary = nested_module_summary(repo, scan_subdirs, ignore_dirs, ignore_paths=ignore_paths)
     edge_details = file_dependency_details(edges, ranked_files)
     changed_files, diff_error = git_changed_files(repo, diff_range)
     changed_line_ranges, diff_ranges_error = parse_git_diff_ranges(repo, diff_range)

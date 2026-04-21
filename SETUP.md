@@ -33,6 +33,15 @@ graplite init --write-runner --write-gitignore
 graplite scan
 ```
 
+If the repo has noisy generated or legacy subtrees, tune `.graplite.json`:
+
+```json
+{
+  "profile": "ai-clean",
+  "ignorePaths": ["app/lib/generated", "backend/generated"]
+}
+```
+
 ## Shortest future workflow
 
 ```bash

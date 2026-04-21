@@ -46,3 +46,15 @@ npm publish --access public
 If you only use local source / `npm link`, publish is optional.
 
 If you want users or other machines running `npx graplite-scan` to receive the update, publish is required.
+
+## Current quality levers to remember
+
+When improving output quality for real repos, prefer these before adding heavier analysis:
+
+1. improve summaries (`MAP.md` / `IMPACT.md`)
+2. reduce repo-specific noise
+3. add narrow, explainable heuristics
+
+Repo-local noise control now lives in `.graplite.json` via:
+- `ignoreDirs`
+- `ignorePaths`

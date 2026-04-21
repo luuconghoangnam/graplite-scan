@@ -119,7 +119,9 @@ Each scanned project can keep its own config file:
   "fastFile": "MAP.md",
   "blastFile": "IMPACT.md",
   "outDir": "",
-  "diffRange": ""
+  "diffRange": "",
+  "ignoreDirs": [],
+  "ignorePaths": []
 }
 ```
 
@@ -140,6 +142,34 @@ For AI-friendly output, use:
 - trimming noisy tree output
 - skipping some low-value inventory sections
 - shortening oversized symbol/tree sections
+
+### Noise control per repo
+
+This is the highest-leverage quality knob when a repo has local clutter.
+
+Use `ignoreDirs` for directory names that should be ignored everywhere they appear:
+
+```json
+{
+  "ignoreDirs": ["storybook-static", ".turbo"]
+}
+```
+
+Use `ignorePaths` for repo-relative subtrees you want excluded precisely:
+
+```json
+{
+  "ignorePaths": [
+    "backend/generated",
+    "app/lib/generated",
+    "packages/legacy-playground"
+  ]
+}
+```
+
+Why both exist:
+- `ignoreDirs` is broad and convenient
+- `ignorePaths` is precise and safer for repo-specific cleanup
 
 ---
 
