@@ -146,6 +146,10 @@ CS_ICOMMAND_PROP_RE = re.compile(
     r'\bICommand\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*Command)\b',
     re.M,
 )
+CS_COMMAND_ASSIGN_RE = re.compile(
+    r'\b(?P<name>[A-Za-z_][A-Za-z0-9_]*Command)\s*=\s*new\s+(?P<kind>[A-Za-z_][A-Za-z0-9_]*)',
+    re.M,
+)
 
 TS_DEF_RES = [
     ("class", re.compile(r"^\s*(?:export\s+)?class\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b", re.M)),
@@ -3060,7 +3064,6 @@ def render_blast_map(
                 continue
             flow_rows.append((file_path, prioritized_side_effects[:8], supporting_links[:8], frontend_spine[:8]))
         return flow_rows
-        return flow_rows
 
     def build_frontend_shared_surface_map() -> List[Tuple[int, str, List[str], List[str], List[str]]]:
         candidates: List[Tuple[int, str, List[str], List[str], List[str]]] = []
@@ -3126,13 +3129,30 @@ def render_blast_map(
                             if candidate not in bucket:
                                 bucket.append(candidate)
 
+            def append_files_containing(bucket: List[str], names: Iterable[str], candidates: Iterable[str]) -> None:
+                wanted = [name.split('.')[-1].strip() for name in names if name and name.strip()]
+                for candidate in candidates:
+                    lower_candidate = candidate.lower()
+                    if not lower_candidate.endswith('.cs'):
+                        continue
+                    txt_candidate = safe_read_text(repo / candidate)
+                    for wanted_name in wanted:
+                        if not wanted_name:
+                            continue
+                        if re.search(r'\b' + re.escape(wanted_name) + r'\b', txt_candidate):
+                            if candidate not in bucket:
+                                bucket.append(candidate)
+                            break
+
             vm_links = [dep for dep in deps if '/ViewModels/' in dep or dep.endswith('ViewModel.cs')]
             service_links = [dep for dep in deps if '/Services/' in dep or dep.endswith('Service.cs')]
             command_links = [dep for dep in deps if '/Commands/' in dep or dep.endswith('Command.cs')]
             control_links = [dep for dep in deps if '/Controls/' in dep or dep.endswith('.xaml') and '/Views/' not in dep]
             append_matches(vm_links, (m.group('name') for m in XAML_DATACONTEXT_RE.finditer(txt)), ('/viewmodels/', 'viewmodel'))
             append_matches(vm_links, (m.group('name') for m in XAML_VM_TYPE_RE.finditer(txt) if m.group('prefix').lower() in {'vm', 'viewmodels', 'viewmodel'}), ('/viewmodels/', 'viewmodel'))
-            append_matches(command_links, (m.group('name') for m in XAML_COMMAND_RE.finditer(txt)), ('/commands/', 'command'))
+            xaml_command_names = [m.group('name') for m in XAML_COMMAND_RE.finditer(txt)]
+            append_matches(command_links, xaml_command_names, ('/commands/', 'command'))
+            append_files_containing(vm_links, xaml_command_names, [candidate for candidate in all_candidates if '/ViewModels/' in candidate or candidate.endswith('ViewModel.cs')])
             codebehind_txt = safe_read_text(repo / (canonical_view + '.cs')) if (repo / (canonical_view + '.cs')).exists() else ''
             for m in CS_NEW_RE.finditer(codebehind_txt):
                 created = m.group('name').lower()
@@ -3160,11 +3180,30 @@ def render_blast_map(
             if CS_RELAY_COMMAND_RE.search(codebehind_txt):
                 append_matches(command_links, ['RelayCommand', 'DelegateCommand', 'AsyncRelayCommand', 'ReactiveCommand'], ('/commands/', 'command'))
             click_handlers = [m.group('name') for m in XAML_CLICK_RE.finditer(txt)]
-            command_names = [m.group('name') for m in XAML_COMMAND_RE.finditer(txt)]
+            command_names = xaml_command_names
             codebehind_commands = [m.group('name') for m in CS_COMMAND_PROP_RE.finditer(codebehind_txt)]
             interface_command_props = [m.group('name') for m in CS_ICOMMAND_PROP_RE.finditer(codebehind_txt)]
+            assigned_command_kinds = [m.group('kind') for m in CS_COMMAND_ASSIGN_RE.finditer(codebehind_txt)]
             ctor_args = [m.group('name') for m in CS_CTOR_ARG_TYPE_RE.finditer(codebehind_txt)]
             has_initialize_component = bool(CS_INITIALIZE_COMPONENT_RE.search(codebehind_txt))
+
+            if vm_links and command_names:
+                for vm_file in list(vm_links):
+                    vm_txt = safe_read_text(repo / vm_file)
+                    if any(re.search(r'\b' + re.escape(name) + r'\b', vm_txt) for name in command_names):
+                        append_matches(command_links, command_names, ('/commands/', 'command'))
+                        for dep in edges.get(vm_file, set()):
+                            lower_dep = dep.lower()
+                            if ('/services/' in dep or dep.endswith('Service.cs')) and dep not in service_links:
+                                service_links.append(dep)
+                            if ('/commands/' in dep or dep.endswith('Command.cs')) and dep not in command_links:
+                                command_links.append(dep)
+                    if any(re.search(r'\b' + re.escape(name) + r'\b', vm_txt) for name in interface_command_props):
+                        for dep in edges.get(vm_file, set()):
+                            if ('/commands/' in dep or dep.endswith('Command.cs')) and dep not in command_links:
+                                command_links.append(dep)
+
+            append_matches(command_links, assigned_command_kinds, ('/commands/', 'command'))
             score = len(vm_links) * 3 + len(service_links) * 2 + len(command_links) * 2 + len(control_links) + len(consumers)
             if canonical_view.lower().endswith('mainwindow.xaml'):
                 score += 4
@@ -3172,7 +3211,7 @@ def render_blast_map(
                 score += 2
             if has_initialize_component:
                 score += 2
-            interaction_hints = click_handlers[:4] + command_names[:4] + codebehind_commands[:4] + interface_command_props[:4] + ctor_args[:4]
+            interaction_hints = click_handlers[:4] + command_names[:4] + codebehind_commands[:4] + interface_command_props[:4] + assigned_command_kinds[:4] + ctor_args[:4]
             if has_initialize_component and 'InitializeComponent' not in interaction_hints:
                 interaction_hints.insert(0, 'InitializeComponent')
             rows.append((score, canonical_view, vm_links[:5], service_links[:5], command_links[:5], control_links[:5], interaction_hints[:8]))
