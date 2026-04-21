@@ -393,7 +393,9 @@ Anti-noise checks:
 
 ### `backend-nest`
 - First miss observed: backend structure is detected, but some wording and shared-surface heuristics still leak frontend/state language into a multi-package backend repo.
-- Likely next fix area: separate backend shared-surface wording from frontend/state-specific wording when repo shape is clearly backend-dominant.
+- Fix applied: restrict frontend shared-surface detection to files rooted in frontend/app-oriented paths, so backend package folders like `packages/*/context/` no longer get mislabeled as frontend state surfaces.
+- Result after fix: `backend-nest/IMPACT.md` keeps backend-central risk ranking while frontend/shared-state sections stay empty instead of hallucinating app-side impact.
+- Likely next fix area: improve backend-centric wording for package-level architecture summaries and change recipes.
 
 ### `desktop-mvvm`
 - First miss observed: large sample repo is recognized structurally in the tree, but architecture summary stays too conservative and does not yet elevate desktop/MVVM shape strongly enough.

@@ -90,9 +90,10 @@ Notes:
 - First benchmark runs completed on `web-next`, `backend-nest`, `desktop-mvvm`, and `flutter-samples`
 - Fixed benchmark miss #1: top-level `app/` / `ui/` roots were not being scanned as frontend candidate roots, causing weak app-router flow detection on `web-next`
 - Fixed benchmark miss #2: sample/multi-app repos with sparse import graphs (`desktop-mvvm`, `flutter-samples`) now get structural fallback impact instead of empty impact sections
+- Fixed benchmark miss #3: backend-dominant package repos like `backend-nest` no longer leak frontend/shared-state wording from generic `/context/` or `/providers/` paths
 - Next recommended slice:
-  - Reduce frontend/shared-surface wording leakage on clearly backend-dominant repos like `backend-nest`
   - Improve repo-level architecture wording for sample-corpus repos
+  - Strengthen benchmark-aware architecture summaries for desktop and Flutter sample collections
 
 ## Reference Repo Assessment
 

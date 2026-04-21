@@ -3112,6 +3112,12 @@ def render_blast_map(
     def build_frontend_shared_surface_map() -> List[Tuple[int, str, List[str], List[str], List[str]]]:
         candidates: List[Tuple[int, str, List[str], List[str], List[str]]] = []
         seen: Set[str] = set()
+        frontend_roots = (
+            'app/', 'ui/', 'src/app/', 'src/pages/', 'src/components/', 'src/features/', 'src/routes/',
+            'src/hooks/', 'src/stores/', 'src/state/', 'src/layouts/', 'src/context/', 'src/providers/',
+            'src/reducers/', 'src/shell/', 'frontend/src/', 'client/src/', 'web/src/', 'pages/',
+            'components/', 'routes/', 'context/', 'providers/', 'shell/', 'app/lib/'
+        )
         for file_path in set(edges.keys()) | set(reverse_edges.keys()):
             lower = file_path.lower()
             if file_path in seen:
@@ -3119,6 +3125,8 @@ def render_blast_map(
             if not lower.endswith(('.tsx', '.jsx', '.ts', '.js', '.vue', '.dart')):
                 continue
             if any(token in lower for token in ('spec.', 'test.', '.d.ts', '__tests__/')):
+                continue
+            if not lower.startswith(frontend_roots):
                 continue
             is_shared_surface = any(token in lower for token in (
                 '/components/', '/widgets/', '/layouts/', '/hooks/', '/stores/', '/state/',
