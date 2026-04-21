@@ -87,9 +87,11 @@ Notes:
 - Expected observations are now drafted for web, backend, C# desktop, and Flutter benchmark candidates in `docs/BENCHMARK_MATRIX.md`
 - Added a concrete MVVM-heavy WPF benchmark candidate: `CommunityToolkit/MVVM-Samples`
 - Added a lightweight benchmark run checklist in `docs/BENCHMARK_MATRIX.md`
+- First benchmark runs completed on `web-next`, `backend-nest`, `desktop-mvvm`, and `flutter-samples`
+- First high-leverage benchmark miss fixed: top-level `app/` / `ui/` roots were not being scanned as frontend candidate roots, causing weak app-router flow detection on `web-next`
 - Next recommended slice:
-  - Start running chosen benchmark repos and record first misses
-  - Fix the highest-leverage benchmark miss per thin slice
+  - Record the next benchmark misses from `backend-nest`, `desktop-mvvm`, and `flutter-samples`
+  - Fix the highest-leverage remaining benchmark miss per thin slice
 
 ## Reference Repo Assessment
 

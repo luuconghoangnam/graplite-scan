@@ -470,6 +470,7 @@ def parse_package_scripts(pkg_json: Path) -> Dict[str, str]:
 def detect_scan_subdirs(repo: Path) -> List[str]:
     candidates = [
         "src",
+        "app",
         "backend/src",
         "app/lib",
         "lib",
@@ -477,6 +478,7 @@ def detect_scan_subdirs(repo: Path) -> List[str]:
         "frontend/src",
         "client/src",
         "web/src",
+        "ui",
         "src/app",
         "src/pages",
         "src/components",
@@ -3006,7 +3008,7 @@ def render_blast_map(
                     add_candidate(child_rel)
 
             preferred_roots = (
-                'src/app/', 'src/pages/', 'src/routes/', 'src/features/', 'src/components/',
+                'app/', 'ui/', 'src/app/', 'src/pages/', 'src/routes/', 'src/features/', 'src/components/',
                 'src/hooks/', 'src/stores/', 'src/state/', 'src/layouts/', 'frontend/src/',
                 'client/src/', 'web/src/', 'pages/', 'components/', 'routes/'
             )
@@ -3025,7 +3027,7 @@ def render_blast_map(
                 if any(token in lower for token in ('spec.', 'test.', '.d.ts', '__tests__/', '/node_modules/')):
                     continue
                 score = 0
-                if any(token in lower for token in ('/pages/', '/routes/', '/app/', '/features/')):
+                if any(token in lower for token in ('/pages/', '/routes/', '/app/', '/features/')) or lower.startswith(('app/', 'ui/')):
                     score += 4
                 if any(token in lower for token in ('page.', 'layout.', 'template.', 'loading.', 'error.', 'not-found.', 'screen.', 'view.', 'tab_')):
                     score += 4
@@ -3121,7 +3123,7 @@ def render_blast_map(
             is_shared_surface = any(token in lower for token in (
                 '/components/', '/widgets/', '/layouts/', '/hooks/', '/stores/', '/state/',
                 '/composables/', '/context/', '/reducers/', '/providers/', '/shell/',
-                '/core/widgets/', '/core/theme/'
+                '/core/widgets/', '/core/theme/', 'ui/'
             ))
             if not is_shared_surface:
                 continue

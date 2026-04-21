@@ -384,6 +384,25 @@ Anti-noise checks:
 - no regression into web-biased terminology for Flutter app surfaces
 - scanner should not over-expand support files or generated artifacts into the main architecture story
 
+## First benchmark findings
+
+### `web-next`
+- First miss observed: app-router repo was detected as frontend, but app-side feature flow and shared surface output were too weak because top-level `app/` and `ui/` roots were not part of scanner candidate roots.
+- Fix applied: scanner now includes top-level `app/` and `ui/` in scan/candidate logic, which materially improves module grouping and frontend feature-flow visibility on `web-next`.
+- Result after fix: `MAP.md` now exposes `app/*` module groups properly, and `IMPACT.md` now emits app-side feature flow entries instead of staying mostly empty.
+
+### `backend-nest`
+- First miss observed: backend structure is detected, but some wording and shared-surface heuristics still leak frontend/state language into a multi-package backend repo.
+- Likely next fix area: separate backend shared-surface wording from frontend/state-specific wording when repo shape is clearly backend-dominant.
+
+### `desktop-mvvm`
+- First miss observed: large sample repo is recognized structurally in the tree, but architecture summary stays too conservative and does not yet elevate desktop/MVVM shape strongly enough.
+- Likely next fix area: detect multi-app/sample desktop repos with strong `Views` / `ViewModels` / `Services` patterns even when those folders are nested under sample roots.
+
+### `flutter-samples`
+- First miss observed: scanner inventories the repo correctly, but architecture summary is too timid for a sample corpus and does not distinguish app-shaped Flutter subprojects from repo-level sample collection shape.
+- Likely next fix area: add sample-collection awareness so Flutter sample corpora can still surface app-oriented subprojects without hallucinating a single app architecture for the whole repo.
+
 ## Lightweight benchmark run checklist
 
 For each benchmark repo run:
