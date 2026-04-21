@@ -840,6 +840,62 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                 project_root = decode_utf8(value)
         return tool_name, tool_version, project_root
 
+    def normalize_structured_symbol(symbol_text: str, display_name: str) -> Optional[str]:
+        if display_name:
+            cleaned_display = display_name.strip()
+            if cleaned_display:
+                return cleaned_display
+
+        symbol_text = symbol_text.strip()
+        if not symbol_text or symbol_text.startswith('local '):
+            return None
+
+        parts = symbol_text.split(' ')
+        if len(parts) < 4:
+            return None
+        descriptor_blob = ' '.join(parts[3:])
+
+        raw_segments = [seg for seg in descriptor_blob.split('/') if seg]
+        if not raw_segments:
+            return None
+
+        cleaned_segments: List[str] = []
+        for seg in raw_segments:
+            seg = seg.replace('`', '')
+            seg = re.sub(r'\([^)]*\)', '()', seg)
+            seg = seg.replace('.()', '()')
+            while '()()' in seg:
+                seg = seg.replace('()()', '()')
+            seg = re.sub(r'\.+$', '', seg)
+            seg = seg.strip()
+            if not seg:
+                continue
+            if seg.endswith('#'):
+                cleaned_segments.append(seg)
+            elif seg.endswith('.'):
+                cleaned_segments.append(seg[:-1] + '()')
+            else:
+                cleaned_segments.append(seg)
+
+        if not cleaned_segments:
+            return None
+
+        tail = cleaned_segments[-1]
+        if tail.startswith('(') and len(cleaned_segments) >= 2:
+            tail = cleaned_segments[-2] + tail
+        if len(cleaned_segments) >= 2 and cleaned_segments[-2].endswith('#') and not tail.startswith(cleaned_segments[-2][:-1]):
+            base = cleaned_segments[-2][:-1]
+            if tail.startswith('('):
+                tail = base + tail
+            elif tail != base and not tail.startswith(base + '#'):
+                tail = base + '#' + tail
+        tail = tail.strip()
+        if not tail or tail.endswith('#'):
+            return None
+        if tail.endswith('.ts') or '/' in tail:
+            return None
+        return tail
+
     def parse_document(buf: bytes) -> Tuple[str, str, List[str]]:
         relative_path = ''
         language = ''
@@ -861,10 +917,9 @@ def detect_scip_index_status(repo: Path, scip_readiness: ScipReadiness) -> ScipI
                         symbol_text = decode_utf8(nested_val)
                     elif nested_no == 6:
                         display_name = decode_utf8(nested_val)
-                if display_name:
-                    symbols.append(display_name)
-                elif symbol_text:
-                    symbols.append(symbol_text)
+                normalized = normalize_structured_symbol(symbol_text, display_name)
+                if normalized:
+                    symbols.append(normalized)
         return relative_path, language, symbols
 
     index_path = repo / scip_readiness.index_path
