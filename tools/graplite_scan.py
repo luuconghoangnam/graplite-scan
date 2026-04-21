@@ -77,6 +77,9 @@ MANIFEST_NAMES = {
     ".env",
     "README.md",
     "codemagic.yaml",
+    "*.csproj",
+    "*.sln",
+    "App.xaml",
 }
 
 TS_IMPORT_RE = re.compile(
@@ -90,6 +93,14 @@ TS_SIDE_EFFECT_IMPORT_RE = re.compile(
 DART_IMPORT_RE = re.compile(
     r"^\s*(?:import|export)\s+['\"](?P<spec>[^'\"]+)['\"];?\s*$",
     re.M,
+)
+CS_USING_RE = re.compile(
+    r'^\s*using\s+(?:static\s+)?(?P<spec>[A-Za-z_][A-Za-z0-9_\.]+)\s*;\s*$',
+    re.M,
+)
+XAML_CODEBEHIND_RE = re.compile(
+    r'x:Class\s*=\s*["\'](?P<klass>[^"\']+)["\']',
+    re.I,
 )
 
 TS_DEF_RES = [
@@ -107,6 +118,14 @@ DART_DEF_RES = [
 PY_DEF_RES = [
     ("class", re.compile(r"^\s*class\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b", re.M)),
     ("function", re.compile(r"^\s*(?:async\s+)?def\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(", re.M)),
+]
+
+CS_DEF_RES = [
+    ("class", re.compile(r"^\s*(?:public\s+|internal\s+|private\s+|protected\s+|abstract\s+|sealed\s+|partial\s+|static\s+)*class\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b", re.M)),
+    ("interface", re.compile(r"^\s*(?:public\s+|internal\s+|private\s+|protected\s+|partial\s+)*interface\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b", re.M)),
+    ("record", re.compile(r"^\s*(?:public\s+|internal\s+|private\s+|protected\s+|partial\s+)*record\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b", re.M)),
+    ("enum", re.compile(r"^\s*(?:public\s+|internal\s+|private\s+|protected\s+)*enum\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\b", re.M)),
+    ("method", re.compile(r"^\s*(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|virtual\s+|override\s+|async\s+|sealed\s+|partial\s+)*(?:[A-Za-z_][A-Za-z0-9_<>\[\],?]*\s+)+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(", re.M)),
 ]
 
 ENV_USAGE_RE = re.compile(r"process\.env\.([A-Z0-9_]+)")
@@ -164,6 +183,12 @@ DIR_RESP_HINTS = {
     'features': 'feature-oriented modules',
     'modules': 'backend feature modules',
     'transfer': 'transfer/signaling/storage flow',
+    'views': 'desktop UI views/windows/pages',
+    'viewmodels': 'desktop viewmodel/state layer',
+    'controls': 'desktop shared UI controls',
+    'models': 'domain/data models',
+    'converters': 'UI binding converters',
+    'commands': 'UI command handlers',
 }
 
 
@@ -376,7 +401,9 @@ def find_manifests(
             continue
         if len(rel.parts) > max_depth:
             continue
-        if p.is_file() and p.name in MANIFEST_NAMES:
+        if not p.is_file():
+            continue
+        if p.name in MANIFEST_NAMES or p.suffix in {'.csproj', '.sln'}:
             out.append(rel.as_posix())
     return sorted(set(out))
 
@@ -417,6 +444,12 @@ def detect_scan_subdirs(repo: Path) -> List[str]:
         "packages",
         "services",
         "tools",
+        "Views",
+        "ViewModels",
+        "Controls",
+        "Models",
+        "Converters",
+        "Commands",
         "ExtentionChrome/extension",
     ]
     seen: Set[str] = set()
@@ -472,6 +505,10 @@ def build_import_graph(
     edges: Dict[str, Set[str]] = {}
     file_lang: Dict[str, str] = {}
 
+    cs_class_index: Dict[str, str] = {}
+    xaml_class_index: Dict[str, str] = {}
+    candidate_files: List[Path] = []
+
     for sub in subdirs:
         base = repo / sub
         if not base.exists():
@@ -479,36 +516,75 @@ def build_import_graph(
         for p in base.rglob("*"):
             if is_ignored(p, ignore_dirs, root=repo, ignore_paths=ignore_paths) or not p.is_file():
                 continue
-            if p.suffix not in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte", ".dart", ".py"}:
+            if p.suffix not in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte", ".dart", ".py", ".cs", ".xaml"}:
                 continue
-
+            candidate_files.append(p)
             rel = relpath_posix(p, repo)
             txt = safe_read_text(p)
-            if p.suffix in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte"}:
-                file_lang[rel] = "ts"
-                specs = [m.group("spec") for m in TS_IMPORT_RE.finditer(txt)]
-                specs.extend(m.group("spec") for m in TS_SIDE_EFFECT_IMPORT_RE.finditer(txt))
-                for s in specs:
-                    rp = resolve_ts_import(s, p)
-                    if rp is None:
-                        continue
-                    try:
-                        edges.setdefault(rel, set()).add(relpath_posix(rp, repo))
-                    except Exception:
-                        continue
-            elif p.suffix == ".dart":
-                file_lang[rel] = "dart"
-                specs = [m.group("spec") for m in DART_IMPORT_RE.finditer(txt)]
-                for s in specs:
-                    rp = resolve_dart_import(s, p)
-                    if rp is None:
-                        continue
-                    try:
-                        edges.setdefault(rel, set()).add(relpath_posix(rp, repo))
-                    except Exception:
-                        continue
-            elif p.suffix == ".py":
-                file_lang[rel] = "py"
+            if p.suffix == '.cs':
+                file_lang[rel] = 'cs'
+                stem = p.stem.lower()
+                cs_class_index[stem] = rel
+                for _kind, rx in CS_DEF_RES[:4]:
+                    for m in rx.finditer(txt):
+                        cs_class_index[m.group('name').lower()] = rel
+            elif p.suffix == '.xaml':
+                file_lang[rel] = 'xaml'
+                m = XAML_CODEBEHIND_RE.search(txt)
+                if m:
+                    xaml_class_index[m.group('klass').split('.')[-1].lower()] = rel
+
+    for p in candidate_files:
+        rel = relpath_posix(p, repo)
+        txt = safe_read_text(p)
+        if p.suffix in {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".vue", ".svelte"}:
+            file_lang[rel] = "ts"
+            specs = [m.group("spec") for m in TS_IMPORT_RE.finditer(txt)]
+            specs.extend(m.group("spec") for m in TS_SIDE_EFFECT_IMPORT_RE.finditer(txt))
+            for s in specs:
+                rp = resolve_ts_import(s, p)
+                if rp is None:
+                    continue
+                try:
+                    edges.setdefault(rel, set()).add(relpath_posix(rp, repo))
+                except Exception:
+                    continue
+        elif p.suffix == ".dart":
+            file_lang[rel] = "dart"
+            specs = [m.group("spec") for m in DART_IMPORT_RE.finditer(txt)]
+            for s in specs:
+                rp = resolve_dart_import(s, p)
+                if rp is None:
+                    continue
+                try:
+                    edges.setdefault(rel, set()).add(relpath_posix(rp, repo))
+                except Exception:
+                    continue
+        elif p.suffix == ".py":
+            file_lang[rel] = "py"
+        elif p.suffix == '.cs':
+            for m in CS_USING_RE.finditer(txt):
+                target = m.group('spec').split('.')[-1].lower()
+                target_rel = cs_class_index.get(target) or xaml_class_index.get(target)
+                if target_rel and target_rel != rel:
+                    edges.setdefault(rel, set()).add(target_rel)
+            if p.name.endswith('.xaml.cs'):
+                xaml_rel = rel[:-3]
+                if (repo / xaml_rel).exists():
+                    edges.setdefault(rel, set()).add(xaml_rel)
+            stem_target = xaml_class_index.get(p.stem.lower())
+            if stem_target and stem_target != rel:
+                edges.setdefault(rel, set()).add(stem_target)
+        elif p.suffix == '.xaml':
+            codebehind = rel + '.cs'
+            if (repo / codebehind).exists():
+                edges.setdefault(rel, set()).add(codebehind)
+            m = XAML_CODEBEHIND_RE.search(txt)
+            if m:
+                target = m.group('klass').split('.')[-1].lower()
+                code_rel = cs_class_index.get(target)
+                if code_rel and code_rel != rel:
+                    edges.setdefault(rel, set()).add(code_rel)
     return edges, file_lang
 
 
@@ -538,6 +614,14 @@ def extract_symbols(
             for kind, rx in PY_DEF_RES:
                 for m in rx.finditer(txt):
                     out.append(SymbolDef(lang=lang, kind=kind, name=m.group("name"), path=rel, line=txt[: m.start()].count("\n") + 1))
+        elif lang == "cs":
+            for kind, rx in CS_DEF_RES:
+                for m in rx.finditer(txt):
+                    out.append(SymbolDef(lang=lang, kind=kind, name=m.group("name"), path=rel, line=txt[: m.start()].count("\n") + 1))
+        elif lang == "xaml":
+            match = XAML_CODEBEHIND_RE.search(txt)
+            if match:
+                out.append(SymbolDef(lang=lang, kind='view', name=match.group('klass').split('.')[-1], path=rel, line=txt[: match.start()].count("\n") + 1))
     return out
 
 
@@ -914,6 +998,7 @@ def detect_backend_entry(repo: Path) -> Optional[str]:
         "server/index.ts", "server/main.ts", "api/index.ts", "api/server.ts",
         "backend/src/main.js", "backend/src/index.js", "server/index.js", "server/main.js",
         "src/server.ts", "src/app.ts", "server/app.ts", "api/app.ts",
+        "Program.cs",
     )
     for cand in candidates:
         if (repo / cand).exists():
@@ -932,6 +1017,7 @@ def detect_frontend_entry(repo: Path) -> Optional[str]:
         "app/page.tsx", "app/page.jsx", "src/app/page.tsx", "src/app/page.jsx",
         "src/App.tsx", "src/App.jsx", "frontend/src/App.tsx", "frontend/src/App.jsx",
         "client/src/App.tsx", "client/src/App.jsx", "web/src/App.tsx", "web/src/App.jsx",
+        "App.xaml", "MainWindow.xaml",
     )
     for cand in priority_candidates:
         if (repo / cand).exists():
@@ -975,7 +1061,9 @@ def architecture_summary_lines(
         'src/state/', 'src/layouts/', 'frontend/src/', 'client/src/', 'web/src/',
         'pages/', 'components/', 'routes/'
     )
+    desktop_prefixes = ('Views/', 'ViewModels/', 'Controls/', 'Models/', 'Converters/', 'Commands/', 'Services/')
     app_groups = [name for name in module_names if name.startswith(frontend_prefixes)]
+    desktop_groups = [name for name in module_names if name.startswith(desktop_prefixes)]
     backend_groups = [name.split('/')[-1] for name in module_names if name.startswith(('backend/src/modules/', 'server/', 'services/', 'api/'))]
 
     def frontend_group_label(path: str) -> Optional[str]:
@@ -1011,9 +1099,15 @@ def architecture_summary_lines(
     if backend_entry or flutter_entry:
         runtime_parts: List[str] = []
         if backend_entry:
-            runtime_parts.append(f"backend runtime enters at `{backend_entry}`")
+            if backend_entry.endswith('Program.cs'):
+                runtime_parts.append(f"desktop runtime enters at `{backend_entry}`")
+            else:
+                runtime_parts.append(f"backend runtime enters at `{backend_entry}`")
         if flutter_entry:
-            runtime_parts.append(f"app/frontend runtime enters at `{flutter_entry}`")
+            if flutter_entry.endswith('.xaml'):
+                runtime_parts.append(f"desktop UI shell enters at `{flutter_entry}`")
+            else:
+                runtime_parts.append(f"app/frontend runtime enters at `{flutter_entry}`")
         lines.append(f"- Runtime entrypoints: {'; '.join(runtime_parts)}")
 
     subsystem_bits: List[str] = []
@@ -1029,8 +1123,18 @@ def architecture_summary_lines(
     if 'backend' in top_names or 'server' in top_names or backend_entry:
         if backend_groups:
             subsystem_bits.append(f"backend groups: {', '.join(f'`{name}`' for name in backend_groups[:8])}")
-        else:
+        elif not desktop_groups:
             subsystem_bits.append("backend/service layer present")
+    if desktop_groups or backend_entry == 'Program.cs' or (flutter_entry and flutter_entry.endswith('.xaml')):
+        desktop_labels: List[str] = []
+        for path in desktop_groups:
+            base = path.rstrip('/').split('/')[-1]
+            if base not in desktop_labels:
+                desktop_labels.append(base)
+        if desktop_labels:
+            subsystem_bits.append(f"desktop app shape: {', '.join(f'`{name}`' for name in desktop_labels[:6])}")
+        else:
+            subsystem_bits.append("desktop app layers present")
     if 'ExtentionChrome' in top_names:
         subsystem_bits.append("browser extension surface present")
     if subsystem_bits:
@@ -1039,6 +1143,17 @@ def architecture_summary_lines(
     meaningful_shared = [label for label in frontend_labels if label in {'UI components', 'state / client logic', 'shared app shell/core'}]
     if meaningful_shared:
         lines.append(f"- Shared frontend building blocks: {', '.join(f'`{name}`' for name in meaningful_shared[:3])}")
+    elif desktop_groups:
+        desktop_shared = [
+            path.rstrip('/').split('/')[-1] for path in desktop_groups
+            if any(path.startswith(prefix) for prefix in ('Controls/', 'Converters/', 'Commands/', 'ViewModels/'))
+        ]
+        if desktop_shared:
+            deduped: List[str] = []
+            for item in desktop_shared:
+                if item not in deduped:
+                    deduped.append(item)
+            lines.append(f"- Shared desktop building blocks: {', '.join(f'`{name}`' for name in deduped[:4])}")
 
     if route_flow_hints:
         unique_routes: List[str] = []
