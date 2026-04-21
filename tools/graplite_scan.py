@@ -1185,6 +1185,16 @@ def render_blast_map(
                         impacted.append(file_path)
             if impacted:
                 lines.append(f"- Impacted files in this path: {', '.join(f'`{p}`' for p in impacted[:8])}")
+                route_symbols: List[str] = []
+                seen_symbols: Set[str] = set()
+                for file_path in impacted:
+                    for symbol in scip_symbols_by_file.get(file_path, []):
+                        if symbol in seen_symbols:
+                            continue
+                        seen_symbols.add(symbol)
+                        route_symbols.append(f"{file_path} :: {symbol}")
+                if route_symbols:
+                    lines.append(f"- Relevant SCIP symbols: {', '.join(f'`{s}`' for s in route_symbols[:8])}")
             for step in hint.chain[1:6]:
                 lines.append(f"- {step}")
     else:
