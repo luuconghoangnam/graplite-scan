@@ -413,6 +413,8 @@ Anti-noise checks:
 - Result after sixth fix: command noise is reduced and scores are less inflated, but buckets still over-collect some ViewModels sharing broad command-property patterns.
 - Seventh fix applied: desktop fallback buckets are now re-ranked per page, preferring page-local stems and explicit command-name hits before broader shared-command matches.
 - Result after seventh fix: page-local owners such as `RelayCommandPageViewModel.cs` and `MessengerPageViewModel.cs` now surface first more reliably, and service buckets favor real services over `*ServicePage.xaml.cs` naming collisions.
+- Eighth fix applied: sample-corpus `Module / feature groups` rendering now respects ranked representative roots instead of blindly echoing nested directory order.
+- Result after eighth fix: `flutter-samples` now leads with stronger app-like roots (`material_3_demo`, `testing_app`, `form_app`, `navigation_and_routing`), and `desktop-mvvm` now presents MAUI/UWP ahead of the core shared project.
 - Remaining gap: generic command-heavy ViewModels can still appear too high when command-property names are globally reused across many sample pages.
 
 ### `flutter-samples`

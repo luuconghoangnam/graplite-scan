@@ -1134,10 +1134,12 @@ def architecture_summary_lines(
             if (child / 'lib').exists():
                 platform_count = sum(1 for name in ('web', 'android', 'ios', 'macos', 'windows', 'linux') if (child / name).exists())
                 marker_count = sum(1 for name in ('README.md', 'test', 'integration_test', 'example') if (child / name).exists())
-                score = platform_count * 3 + marker_count
                 lower_name = child.name.lower()
+                score = platform_count * 3 + marker_count
                 if any(token in lower_name for token in ('form', 'navigation', 'material', 'gallery', 'app', 'demo')):
                     score += 3
+                if any(token in lower_name for token in ('platform_', 'shader', 'splash', 'isolate')):
+                    score -= 2
                 if any(token in lower_name for token in ('analysis_defaults', 'background_isolate_channels')):
                     score -= 5
                 flutter_ranked.append((score, child.name))
@@ -1157,6 +1159,8 @@ def architecture_summary_lines(
                     lower_rel = relpath_posix(child, repo).lower()
                     if any(token in lower_rel for token in ('maui', 'wpf', 'uwp', 'xf')):
                         score += 2
+                    if lower_rel.endswith('/mvvmsample.core') or lower_rel.endswith('/core'):
+                        score -= 3
                     desktop_ranked.append((score, relpath_posix(child, repo).rstrip('/')))
         desktop_ranked.sort(key=lambda item: (-item[0], item[1]))
         desktop_sample_roots = [name for _score, name in desktop_ranked]
@@ -2723,47 +2727,67 @@ def render_fast_map(
     lines.append("")
 
     lines.append("## Module / feature groups")
-    if module_summary:
-        for name, desc in module_summary[:80]:
-            lines.append(f"- `{name}` — {desc}")
-    else:
-        flutter_sample_groups: List[Tuple[str, str]] = []
-        desktop_sample_groups: List[Tuple[str, str]] = []
-        try:
-            for child in sorted(repo.iterdir()):
+    prioritized_groups: List[Tuple[str, str]] = []
+    try:
+        flutter_ranked: List[Tuple[int, str, str]] = []
+        for child in sorted(repo.iterdir()):
+            if not child.is_dir():
+                continue
+            if (child / 'lib').exists():
+                desc = 'Flutter app/sample root'
+                platform_count = sum(1 for name in ('web', 'android', 'ios', 'macos', 'windows', 'linux') if (child / name).exists())
+                marker_count = sum(1 for name in ('README.md', 'test', 'integration_test', 'example') if (child / name).exists())
+                lower_name = child.name.lower()
+                score = platform_count * 3 + marker_count
+                if any(token in lower_name for token in ('material', 'testing', 'form', 'navigation', 'gallery', 'demo', 'app')):
+                    score += 3
+                if any(token in lower_name for token in ('platform_', 'shader', 'splash', 'isolate')):
+                    score -= 2
+                if any((child / name).exists() for name in ('web', 'android', 'ios', 'macos', 'windows', 'linux')):
+                    desc = 'Flutter app/sample root with multi-platform surfaces'
+                flutter_ranked.append((score, child.name + '/', desc))
+
+        desktop_ranked: List[Tuple[int, str, str]] = []
+        samples_dir = repo / 'samples'
+        if samples_dir.exists() and samples_dir.is_dir():
+            for child in sorted(samples_dir.iterdir()):
                 if not child.is_dir():
                     continue
-                if (child / 'lib').exists():
-                    desc = 'Flutter app/sample root'
-                    if any((child / name).exists() for name in ('web', 'android', 'ios', 'macos', 'windows', 'linux')):
-                        desc = 'Flutter app/sample root with multi-platform surfaces'
-                    flutter_sample_groups.append((child.name + '/', desc))
-            samples_dir = repo / 'samples'
-            if samples_dir.exists() and samples_dir.is_dir():
-                for child in sorted(samples_dir.iterdir()):
-                    if not child.is_dir():
-                        continue
-                    markers = [name for name in ('Views', 'ViewModels', 'Controls', 'Services', 'App.xaml', 'AppShell.xaml', 'Shell.xaml') if (child / name).exists()]
-                    if markers:
-                        desktop_sample_groups.append((relpath_posix(child, repo).rstrip('/') + '/', 'desktop sample root with MVVM/shell surfaces'))
-        except OSError:
-            pass
+                markers = [name for name in ('Views', 'ViewModels', 'Controls', 'Services', 'App.xaml', 'AppShell.xaml', 'Shell.xaml') if (child / name).exists()]
+                if markers:
+                    score = 0
+                    score += sum(1 for marker in ('Views', 'ViewModels', 'Controls', 'Services') if (child / marker).exists())
+                    score += 2 * sum(1 for marker in ('App.xaml', 'AppShell.xaml', 'Shell.xaml') if (child / marker).exists())
+                    lower_rel = relpath_posix(child, repo).lower()
+                    if any(token in lower_rel for token in ('maui', 'wpf', 'uwp', 'xf')):
+                        score += 2
+                    if lower_rel.endswith('/mvvmsample.core') or lower_rel.endswith('/core'):
+                        score -= 3
+                    desktop_ranked.append((score, relpath_posix(child, repo).rstrip('/') + '/', 'desktop sample root with MVVM/shell surfaces'))
 
-        if flutter_sample_groups:
-            ranked = sorted(
-                flutter_sample_groups,
-                key=lambda item: (
-                    0 if any(token in item[0].lower() for token in ('material', 'testing', 'form', 'navigation', 'gallery', 'demo')) else 1,
-                    item[0],
-                )
-            )
-            for name, desc in ranked[:6]:
-                lines.append(f"- `{name}` — {desc}")
-        elif desktop_sample_groups:
-            for name, desc in desktop_sample_groups[:6]:
-                lines.append(f"- `{name}` — {desc}")
-        else:
-            lines.append("- (No nested module groups detected.)")
+        if flutter_ranked:
+            flutter_ranked.sort(key=lambda item: (-item[0], item[1]))
+            prioritized_groups = [(name, desc) for _score, name, desc in flutter_ranked[:6]]
+        elif desktop_ranked:
+            desktop_ranked.sort(key=lambda item: (-item[0], item[1]))
+            prioritized_groups = [(name, desc) for _score, name, desc in desktop_ranked[:6]]
+    except OSError:
+        pass
+
+    if module_summary:
+        seen_group_names: Set[str] = set()
+        for name, desc in prioritized_groups:
+            lines.append(f"- `{name}` — {desc}")
+            seen_group_names.add(name)
+        for name, desc in module_summary[:80]:
+            if name in seen_group_names:
+                continue
+            lines.append(f"- `{name}` — {desc}")
+    elif prioritized_groups:
+        for name, desc in prioritized_groups[:6]:
+            lines.append(f"- `{name}` — {desc}")
+    else:
+        lines.append("- (No nested module groups detected.)")
     lines.append("")
 
     filtered_tree = filter_tree_lines(tree)
